@@ -40,16 +40,17 @@ type Matter interface {
 
 // Server serves the hub API.
 type Server struct {
-	hub    *hub.Hub
-	matter Matter
-	token  string
-	log    *slog.Logger
+	hub     *hub.Hub
+	matter  Matter
+	token   string
+	log     *slog.Logger
+	limiter *loginLimiter
 }
 
 // New builds the API. password must be non-empty; clients exchange it for a
 // session token at POST /api/login.
 func New(h *hub.Hub, m Matter, password string, log *slog.Logger) *Server {
-	return &Server{hub: h, matter: m, token: sessionToken(password), log: log}
+	return &Server{hub: h, matter: m, token: sessionToken(password), log: log, limiter: newLoginLimiter()}
 }
 
 // sessionToken derives the token from the password, so the password itself is
@@ -112,14 +113,24 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	client := clientIP(r)
+	if ok, wait := s.limiter.allow(client); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		writeError(w, http.StatusTooManyRequests, "too many failed sign-ins; try again later")
+		return
+	}
 	if subtle.ConstantTimeCompare([]byte(sessionToken(body.Password)), []byte(s.token)) != 1 {
+		s.limiter.fail(client)
+		s.log.Warn("failed sign-in", "client", client)
 		writeError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
-	// Secure only over HTTPS: on the home network the hub is often plain HTTP,
-	// and a Secure cookie would never be sent back.
+	s.limiter.succeed(client)
+	// Secure only over HTTPS (directly or through the tunnel): on the home
+	// network the hub is often plain HTTP, and a Secure cookie would never be
+	// sent back.
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure depends on the request, see above
-		Name: authCookie, Value: s.token, Path: "/", HttpOnly: true, Secure: r.TLS != nil,
+		Name: authCookie, Value: s.token, Path: "/", HttpOnly: true, Secure: isHTTPS(r),
 		SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 60 * 60,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"token": s.token})
@@ -127,7 +138,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure depends on the request, as in login
-		Name: authCookie, Value: "", Path: "/", HttpOnly: true, Secure: r.TLS != nil,
+		Name: authCookie, Value: "", Path: "/", HttpOnly: true, Secure: isHTTPS(r),
 		SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

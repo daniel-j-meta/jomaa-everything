@@ -228,3 +228,45 @@ func TestMatterEndpoints(t *testing.T) {
 		t.Fatalf("disconnected: %d", s)
 	}
 }
+
+func TestLoginIsRateLimited(t *testing.T) {
+	e := setup(t)
+	for range 5 {
+		if s, _ := e.do(t, "POST", "/api/login", `{"password":"guess"}`, ""); s != http.StatusUnauthorized {
+			t.Fatalf("wrong password: %d", s)
+		}
+	}
+	// Even the right password is refused while locked out.
+	s, body := e.do(t, "POST", "/api/login", `{"password":"hunter2"}`, "")
+	if s != http.StatusTooManyRequests || body["error"] == nil {
+		t.Fatalf("after 5 failures: %d %v", s, body)
+	}
+	// Signed-in clients keep working.
+	if s, _ := e.do(t, "GET", "/api/targets", "", e.token); s != http.StatusOK {
+		t.Fatalf("existing session blocked: %d", s)
+	}
+}
+
+func TestTunnelClientsAreLimitedSeparately(t *testing.T) {
+	e := setup(t)
+	login := func(ip, password string) int {
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL+"/api/login",
+			strings.NewReader(`{"password":"`+password+`"}`))
+		req.Header.Set("CF-Connecting-IP", ip)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	for range 5 {
+		login("203.0.113.1", "guess")
+	}
+	if s := login("203.0.113.1", "hunter2"); s != http.StatusTooManyRequests {
+		t.Fatalf("attacker not blocked: %d", s)
+	}
+	if s := login("198.51.100.7", "hunter2"); s != http.StatusOK {
+		t.Fatalf("another tunnel client blocked: %d", s)
+	}
+}

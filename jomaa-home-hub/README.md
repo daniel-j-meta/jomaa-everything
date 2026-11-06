@@ -42,6 +42,38 @@ python3 scripts/hubctl.py status
 `hubctl.py dev` runs the Matter server in Docker and the hub from source, for
 working on the hub.
 
+## Reach it from anywhere
+
+A Cloudflare Tunnel serves the hub at `https://hub.yourdomain.com` without
+opening ports on your router. `cloudflared` runs next to the hub and connects
+out to Cloudflare, and Cloudflare provides the HTTPS certificate. Only the hub
+is exposed, never the Matter server.
+
+1. Your domain must be on Cloudflare.
+2. Create an API token with **Account > Cloudflare Tunnel > Edit**,
+   **Zone > DNS > Edit** and **Zone > Zone > Read**.
+3. Set `"hostname"` in `cloudflare.json`.
+4. On the hub machine, add `CLOUDFLARE_API_TOKEN` to `.env` and use a
+   `HUB_PASSWORD` of at least 16 characters. Then run:
+
+```bash
+python3 scripts/hubctl.py up
+```
+
+That creates the tunnel, its route and the DNS record if they don't exist,
+starts `cloudflared`, and checks that the public URL answers. In the phone
+apps, sign in with `https://hub.yourdomain.com`; that address works at home
+and away.
+
+`scripts/cloudflare.py status` shows tunnel health. `scripts/cloudflare.py
+destroy` removes the tunnel and the DNS record. The `hub-deploy` GitHub
+workflow runs the tests and then `cloudflare.py deploy` on every push to
+`main`, using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+repository secrets, the same way device-panel deploys its Worker.
+
+Sign-in is rate limited: 5 wrong passwords per address every 15 minutes, and
+50 across all addresses.
+
 ## Add a Matter device
 
 ```bash

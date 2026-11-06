@@ -31,3 +31,19 @@ services:
       GOVEE_API_KEY: ${GOVEE_API_KEY:-}
     volumes:
       - ./config.json:/etc/jomaa-home-hub/config.json:ro
+
+  cloudflared:
+    # Cloudflare Tunnel: serves the hub at the hostname in cloudflare.json
+    # without opening router ports. Started by scripts/cloudflare.py run,
+    # which supplies the tunnel token; only the hub is exposed, never the
+    # Matter server.
+    image: cloudflare/cloudflared:2026.10.7
+    container_name: jomaa-cloudflared
+    profiles: [tunnel]
+    network_mode: host
+    restart: unless-stopped
+    depends_on: [hub]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+
