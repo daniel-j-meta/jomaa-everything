@@ -64,7 +64,10 @@ jobs:
           python3 jomaa-home-client/scripts/test_hub.py > test_hub.log 2>&1 &
           for i in $(seq 60); do curl -sf http://127.0.0.1:8797/healthz && exit 0; sleep 1; done
           cat test_hub.log; exit 1
-      - name: Unit and UI tests
+      - name: Generate the Xcode project
+        working-directory: jomaa-home-client/ios
+        run: brew install xcodegen && xcodegen generate
+      - name: Core, widget and UI tests
         working-directory: jomaa-home-client/ios
         run: >-
           xcodebuild test -project DevicePanel.xcodeproj -scheme DevicePanel

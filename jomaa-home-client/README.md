@@ -5,7 +5,7 @@ looks the same to them, whether it's a Matter bulb or a Govee lamp the hub
 controls through Govee's cloud.
 
 - `android/`: Kotlin and Jetpack Compose, with a home-screen widget
-- `ios/`: SwiftUI
+- `ios/`: SwiftUI, with home-screen widgets, Shortcuts and a Control Center toggle
 
 Both apps:
 

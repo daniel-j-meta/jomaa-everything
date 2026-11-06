@@ -5,7 +5,7 @@
     verify.py --emulator   also the Android emulator tests (needs a running emulator)
 
 Android needs JDK 17 and the Android SDK (JAVA_HOME and ANDROID_HOME set).
-iOS needs Xcode, so it is skipped on other machines.
+iOS needs Xcode and xcodegen, so it is skipped on other machines.
 """
 
 from __future__ import annotations
@@ -44,16 +44,19 @@ def main() -> int:
         run("python scripts compile", [sys.executable, "-m", "py_compile", *map(str, (CLIENT_DIR / "scripts").glob("*.py"))], CLIENT_DIR),
         run("android: " + " ".join(t.removeprefix(":app:") for t in tasks), ["./gradlew", "--no-daemon", "-q", *tasks], android),
     ]
-    if shutil.which("xcodebuild"):
+    if shutil.which("xcodebuild") and shutil.which("xcodegen"):
+        ios = CLIENT_DIR / "ios"
+        results.append(run("ios: generate project", ["xcodegen", "generate", "--quiet"], ios))
         results.append(run(
-            "ios: DevicePanelTests",
+            "ios: core and widget tests",
             ["xcodebuild", "test", "-project", "DevicePanel.xcodeproj", "-scheme", "DevicePanel",
-             "-destination", "platform=iOS Simulator,name=iPhone 16", "-only-testing:DevicePanelTests",
+             "-destination", "platform=iOS Simulator,name=iPhone 16",
+             "-only-testing:DevicePanelCoreTests", "-only-testing:DevicePanelWidgetTests",
              "CODE_SIGNING_ALLOWED=NO", "-quiet"],
-            CLIENT_DIR / "ios",
+            ios,
         ))
     else:
-        print("skip  ios (needs Xcode on a Mac)")
+        print("skip  ios (needs Xcode and xcodegen on a Mac)")
     failed = results.count(False)
     print("\nall checks passed" if not failed else f"\n{failed} check(s) failed")
     return 1 if failed else 0
