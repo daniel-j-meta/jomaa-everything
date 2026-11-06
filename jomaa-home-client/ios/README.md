@@ -41,7 +41,7 @@ Then, with a simulator:
 
 ```bash
 xcodebuild test -project DevicePanel.xcodeproj -scheme DevicePanel \
-  -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
 ```
 
 Add `-only-testing:DevicePanelCoreTests` to run just the core tests, which

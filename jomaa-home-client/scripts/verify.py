@@ -11,6 +11,7 @@ iOS needs Xcode and xcodegen, so it is skipped on other machines.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,15 @@ def run(name: str, cmd: list[str], cwd: Path) -> bool:
         return True
     print(f"FAIL  {name} ({took:.0f}s)\n{(result.stdout + result.stderr)[-4000:]}\n", flush=True)
     return False
+
+
+def first_iphone() -> str:
+    """The first available iPhone simulator; Xcode versions ship different models."""
+    listing = subprocess.run(
+        ["xcrun", "simctl", "list", "devices", "available", "iPhone", "-j"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    return next(d["udid"] for devices in json.loads(listing)["devices"].values() for d in devices)
 
 
 def main() -> int:
@@ -50,7 +60,7 @@ def main() -> int:
         results.append(run(
             "ios: core and widget tests",
             ["xcodebuild", "test", "-project", "DevicePanel.xcodeproj", "-scheme", "DevicePanel",
-             "-destination", "platform=iOS Simulator,name=iPhone 16",
+             "-destination", f"platform=iOS Simulator,id={first_iphone()}",
              "-only-testing:DevicePanelCoreTests", "-only-testing:DevicePanelWidgetTests",
              "CODE_SIGNING_ALLOWED=NO", "-quiet"],
             ios,
