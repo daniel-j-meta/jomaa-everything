@@ -42,6 +42,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -52,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
@@ -99,6 +101,8 @@ fun DevicePanelApp(viewModel: DevicePanelViewModel) {
             surface = BackgroundBottom,
         ),
     ) {
+        // The gradient Box isn't a Material surface, so give text a light default.
+        CompositionLocalProvider(LocalContentColor provides Color.White) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -130,6 +134,7 @@ fun DevicePanelApp(viewModel: DevicePanelViewModel) {
                     )
                 }
             }
+        }
         }
     }
 }
@@ -275,7 +280,7 @@ private fun ControlScreen(
                         setPower(!room.on)
                     },
                     enabled = !state.powerBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Surface),
+                    colors = ButtonDefaults.buttonColors(containerColor = Surface, contentColor = Color.White),
                     contentPadding = PaddingValues(20.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -505,7 +510,7 @@ private fun ColorButton(
 ) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = color),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = BackgroundTop),
         modifier = modifier
             .height(86.dp)
             .testTag("color$label")
