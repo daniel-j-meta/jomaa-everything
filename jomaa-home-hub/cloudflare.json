@@ -1,5 +1,0 @@
-{
-  "hostname": "hub.example.com",
-  "tunnel": "jomaa-home-hub",
-  "service": "http://localhost:8080"
-}

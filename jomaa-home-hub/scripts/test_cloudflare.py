@@ -5,13 +5,17 @@ Run from jomaa-home-hub/:  python3 -m unittest discover -s scripts
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import shutil
 import sys
 import tempfile
 import threading
 import unittest
 import uuid
+from contextlib import redirect_stdout
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -175,10 +179,9 @@ class CloudflareTest(unittest.TestCase):
         with self.assertRaisesRegex(cloudflare.CloudflareError, "local config file"):
             cloudflare.deploy(self.cf, self.settings)
 
-    def test_placeholder_hostname_makes_no_api_calls(self):
-        settings = cloudflare.Settings("hub.example.com", "t", "http://localhost:8080")
-        with self.assertRaisesRegex(cloudflare.CloudflareError, "set \"hostname\""):
-            cloudflare.deploy(self.cf, settings)
+    def test_missing_hostname_makes_no_api_calls(self):
+        with self.assertRaisesRegex(cloudflare.CloudflareError, "CLOUDFLARE_HOSTNAME is not set"):
+            cloudflare.deploy(self.cf, cloudflare.Settings(""))
         self.assertEqual(self.fake.calls, [])
 
     def test_token_fetch_and_destroy(self):
@@ -194,20 +197,29 @@ class CloudflareTest(unittest.TestCase):
         self.assertEqual(stopped, [("rm", "--stop", "--force", "cloudflared")])
         self.assertEqual((self.fake.tunnels, self.fake.records), ({}, {}))
 
-    def test_settings_validation(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "cloudflare.json"
-            for bad in ({"hostname": "not a host"}, {"hostname": "hub.example.org", "service": "http://10.0.0.5:8080"},
-                        {"hostname": "hub.example.org", "tunnel": "bad name!"}):
-                path.write_text(json.dumps(bad))
-                with self.assertRaises(cloudflare.CloudflareError, msg=str(bad)):
-                    cloudflare.Settings.load(path)
-            path.write_text(json.dumps({"hostname": "Hub.Example.org."}))
-            self.assertEqual(cloudflare.Settings.load(path).hostname, "hub.example.org")
+    def test_settings_come_from_env(self):
+        settings = cloudflare.Settings.from_env({"CLOUDFLARE_HOSTNAME": " Hub.Example.org. "})
+        self.assertEqual(settings, cloudflare.Settings("hub.example.org", "jomaa-home-hub", "http://localhost:8080"))
+        custom = cloudflare.Settings.from_env({"CLOUDFLARE_HOSTNAME": "hub.example.org", "CLOUDFLARE_TUNNEL_NAME": "home",
+                                               "CLOUDFLARE_TUNNEL_SERVICE": "http://127.0.0.1:9000"})
+        self.assertEqual((custom.tunnel, custom.service), ("home", "http://127.0.0.1:9000"))
+        self.assertFalse(cloudflare.Settings.from_env({}).configured)
+        for bad in ({"CLOUDFLARE_HOSTNAME": "not a host"},
+                    {"CLOUDFLARE_HOSTNAME": "hub.example.org", "CLOUDFLARE_TUNNEL_SERVICE": "http://10.0.0.5:8080"},
+                    {"CLOUDFLARE_HOSTNAME": "hub.example.org", "CLOUDFLARE_TUNNEL_NAME": "bad name!"}):
+            with self.assertRaises(cloudflare.CloudflareError, msg=str(bad)):
+                cloudflare.Settings.from_env(bad)
 
-    def test_shipped_settings_file_is_valid_and_unconfigured(self):
-        settings = cloudflare.Settings.load()
-        self.assertFalse(settings.configured)
+    def test_cli_reads_hostname_from_env(self):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_HOSTNAME": "", "CLOUDFLARE_API_TOKEN": ""}), redirect_stdout(out):
+            self.assertEqual(cloudflare.main(["deploy", "--if-configured"]), 0)
+        self.assertIn("CLOUDFLARE_HOSTNAME isn't set", out.getvalue())
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_HOSTNAME": "hub.example.org", "CLOUDFLARE_API_TOKEN": TOKEN}), \
+                mock.patch.object(cloudflare, "API", self.cf.base), redirect_stdout(out):
+            self.assertEqual(cloudflare.main(["deploy"]), 0)
+        self.assertIn("dns hub.example.org", out.getvalue())
+        self.assertEqual(len(self.fake.records), 1)
 
 
 class HubctlTunnelTest(unittest.TestCase):
@@ -215,8 +227,7 @@ class HubctlTunnelTest(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, d)
         (d / "config.json").write_text(json.dumps({"devices": [], "rooms": []}))
-        (d / "cloudflare.json").write_text(json.dumps({"hostname": "hub.example.org"}))
-        env = {"HUB_PASSWORD": "short-password", "CLOUDFLARE_API_TOKEN": "t"}
+        env = {"HUB_PASSWORD": "short-password", "CLOUDFLARE_HOSTNAME": "hub.example.org", "CLOUDFLARE_API_TOKEN": "t"}
         self.assertTrue(any("16+ characters" in p for p in hubctl.check_setup(d, env)))
         env["HUB_PASSWORD"] = "a-much-longer-passphrase"
         self.assertEqual(hubctl.check_setup(d, env), [])

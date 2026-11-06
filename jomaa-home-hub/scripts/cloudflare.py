@@ -6,13 +6,15 @@
     cloudflare.py status     tunnel health, DNS record, and whether the public URL answers
     cloudflare.py destroy    stop cloudflared, delete the DNS record and the tunnel
 
-Settings live in cloudflare.json (hostname, tunnel name, local service), the
-way wrangler.jsonc works for device-panel. Credentials come from the
-environment, with the same names device-panel's deploy workflow uses:
+Everything comes from environment variables, read from the hub's .env file
+or the real environment (GitHub secrets in CI), the same way GOVEE_API_KEY is:
 
-    CLOUDFLARE_API_TOKEN     needs Account > Cloudflare Tunnel > Edit, Zone > DNS > Edit
-                             and Zone > Zone > Read for the domain's zone
-    CLOUDFLARE_ACCOUNT_ID    optional; taken from the zone if unset
+    CLOUDFLARE_HOSTNAME        the public address, like hub.yourdomain.com
+    CLOUDFLARE_API_TOKEN       needs Account > Cloudflare Tunnel > Edit, Zone > DNS > Edit
+                               and Zone > Zone > Read for the domain's zone
+    CLOUDFLARE_ACCOUNT_ID      optional; taken from the domain's zone if unset
+    CLOUDFLARE_TUNNEL_NAME     optional; default jomaa-home-hub
+    CLOUDFLARE_TUNNEL_SERVICE  optional; where the hub listens, default http://localhost:8080
 
 deploy is safe to run again: it reuses the tunnel and record it made before.
 No ports are opened on your router; cloudflared connects out to Cloudflare.
@@ -34,9 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HUB_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = HUB_DIR / "cloudflare.json"
 API = os.environ.get("CLOUDFLARE_API_BASE", "https://api.cloudflare.com/client/v4")
-PLACEHOLDER_SUFFIX = "example.com"
 HOSTNAME = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
@@ -47,50 +47,44 @@ class CloudflareError(Exception):
 @dataclass
 class Settings:
     hostname: str
-    tunnel: str
-    service: str
+    tunnel: str = "jomaa-home-hub"
+    service: str = "http://localhost:8080"
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> Settings:
-        try:
-            raw = json.loads(path.read_text())
-        except FileNotFoundError as e:
-            raise CloudflareError(f"{path.name} is missing") from e
-        except json.JSONDecodeError as e:
-            raise CloudflareError(f"{path.name} is not valid JSON: {e}") from e
+    def from_env(cls, env: dict[str, str]) -> Settings:
         settings = cls(
-            hostname=str(raw.get("hostname", "")).strip().lower().rstrip("."),
-            tunnel=str(raw.get("tunnel", "jomaa-home-hub")),
-            service=str(raw.get("service", "http://localhost:8080")),
+            hostname=env.get("CLOUDFLARE_HOSTNAME", "").strip().lower().rstrip("."),
+            tunnel=env.get("CLOUDFLARE_TUNNEL_NAME") or cls.tunnel,
+            service=env.get("CLOUDFLARE_TUNNEL_SERVICE") or cls.service,
         )
         settings.validate()
         return settings
 
     @property
     def configured(self) -> bool:
-        return not (self.hostname == PLACEHOLDER_SUFFIX or self.hostname.endswith("." + PLACEHOLDER_SUFFIX))
+        return bool(self.hostname)
 
     def validate(self) -> None:
-        if not HOSTNAME.match(self.hostname):
-            raise CloudflareError(f"hostname {self.hostname!r} in cloudflare.json is not a valid DNS name")
+        if self.hostname and not HOSTNAME.match(self.hostname):
+            raise CloudflareError(f"CLOUDFLARE_HOSTNAME {self.hostname!r} is not a valid DNS name")
         if not re.match(r"^[A-Za-z0-9._-]{1,64}$", self.tunnel):
-            raise CloudflareError(f"tunnel name {self.tunnel!r} may only use letters, digits, '.', '_' and '-'")
+            raise CloudflareError(f"CLOUDFLARE_TUNNEL_NAME {self.tunnel!r} may only use letters, digits, '.', '_' and '-'")
         if not re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", self.service):
-            raise CloudflareError("service in cloudflare.json must be http://localhost:<port> (the hub on this machine)")
+            raise CloudflareError("CLOUDFLARE_TUNNEL_SERVICE must be http://localhost:<port> (the hub on this machine)")
 
     def require_configured(self) -> None:
         if not self.configured:
-            raise CloudflareError("set \"hostname\" in cloudflare.json to a name on your Cloudflare domain, like hub.yourdomain.com")
+            raise CloudflareError("CLOUDFLARE_HOSTNAME is not set; set it to a name on your Cloudflare domain, like hub.yourdomain.com")
 
 
 class Cloudflare:
     """Minimal Cloudflare v4 API client: just the calls this script needs."""
 
-    def __init__(self, token: str, base: str = API):
+    def __init__(self, token: str, base: str | None = None):
         if not token:
             raise CloudflareError("CLOUDFLARE_API_TOKEN is not set")
         self.token = token
-        self.base = base.rstrip("/")
+        self.base = (base or API).rstrip("/")
 
     def call(self, method: str, path: str, body: dict | None = None, query: dict | None = None):
         url = self.base + path + ("?" + urllib.parse.urlencode(query) if query else "")
@@ -150,7 +144,7 @@ def deploy(cf: Cloudflare, settings: Settings, account: str | None = None, repla
     elif not tunnel.get("remote_config", False):
         raise CloudflareError(
             f"tunnel {settings.tunnel!r} exists but is managed by a local config file; "
-            "rename the tunnel in cloudflare.json or delete the old one"
+            "set CLOUDFLARE_TUNNEL_NAME to another name or delete the old tunnel"
         )
     tunnel_id = tunnel["id"]
 
@@ -278,20 +272,23 @@ def main(argv: list[str] | None = None) -> int:
     dep = sub.add_parser("deploy", help="create or update the tunnel, routing and DNS")
     dep.add_argument("--replace", action="store_true", help="delete a conflicting DNS record for the hostname")
     dep.add_argument("--if-configured", action="store_true",
-                     help="succeed quietly while cloudflare.json still has the example hostname (for CI)")
+                     help="succeed quietly when CLOUDFLARE_HOSTNAME isn't set (for CI)")
     sub.add_parser("run", help="start cloudflared on this machine")
     sub.add_parser("status", help="show tunnel and DNS health")
     sub.add_parser("destroy", help="remove the tunnel and DNS record")
     args = parser.parse_args(argv)
 
+    from hubctl import load_env  # here, not at the top: hubctl imports this module
+
+    env = load_env(HUB_DIR / ".env")
     try:
-        settings = Settings.load()
+        settings = Settings.from_env(env)
         if getattr(args, "if_configured", False) and not settings.configured:
-            print("cloudflare.json still has the example hostname; skipping deploy")
+            print("CLOUDFLARE_HOSTNAME isn't set; skipping deploy")
             return 0
         settings.require_configured()
-        cf = Cloudflare(os.environ.get("CLOUDFLARE_API_TOKEN", ""))
-        account = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or None
+        cf = Cloudflare(env.get("CLOUDFLARE_API_TOKEN", ""))
+        account = env.get("CLOUDFLARE_ACCOUNT_ID") or None
         if args.command == "deploy":
             out = deploy(cf, settings, account, args.replace)
             print(f"tunnel {settings.tunnel} ({out['tunnel']}): {'created' if out['tunnelCreated'] else 'reused'}")

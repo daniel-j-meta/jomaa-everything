@@ -52,9 +52,15 @@ is exposed, never the Matter server.
 1. Your domain must be on Cloudflare.
 2. Create an API token with **Account > Cloudflare Tunnel > Edit**,
    **Zone > DNS > Edit** and **Zone > Zone > Read**.
-3. Set `"hostname"` in `cloudflare.json`.
-4. On the hub machine, add `CLOUDFLARE_API_TOKEN` to `.env` and use a
-   `HUB_PASSWORD` of at least 16 characters. Then run:
+3. On the hub machine, add these to `.env`, next to `GOVEE_API_KEY`, and use a
+   `HUB_PASSWORD` of at least 16 characters:
+
+```
+CLOUDFLARE_HOSTNAME=hub.yourdomain.com
+CLOUDFLARE_API_TOKEN=...
+```
+
+4. Run:
 
 ```bash
 python3 scripts/hubctl.py up
@@ -68,8 +74,9 @@ and away.
 `scripts/cloudflare.py status` shows tunnel health. `scripts/cloudflare.py
 destroy` removes the tunnel and the DNS record. The `hub-deploy` GitHub
 workflow runs the tests and then `cloudflare.py deploy` on every push to
-`main`, using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
-repository secrets, the same way device-panel deploys its Worker.
+`main`, using the `CLOUDFLARE_HOSTNAME`, `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` repository secrets, the same way device-panel deploys
+its Worker. It skips the deploy until `CLOUDFLARE_HOSTNAME` is set.
 
 Sign-in is rate limited: 5 wrong passwords per address every 15 minutes, and
 50 across all addresses.

@@ -3,7 +3,7 @@
 
     hubctl.py check                 make sure config, secrets and Docker are ready
     hubctl.py up                    start the Matter server and the hub, wait until healthy, and
-                                    bring up the Cloudflare tunnel if cloudflare.json is set
+                                    bring up the Cloudflare tunnel if CLOUDFLARE_HOSTNAME is set
     hubctl.py dev                   start the Matter server in Docker, run the hub from source
     hubctl.py down                  stop everything
     hubctl.py status                show health, devices, rooms and Matter nodes
@@ -55,7 +55,8 @@ def load_env(path: Path) -> dict[str, str]:
                 continue
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip().strip("'\"")
-    for key in ("HUB_PASSWORD", "GOVEE_API_KEY", "HUB_URL", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"):
+    for key in ("HUB_PASSWORD", "GOVEE_API_KEY", "HUB_URL", "CLOUDFLARE_HOSTNAME", "CLOUDFLARE_API_TOKEN",
+                "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_TUNNEL_NAME", "CLOUDFLARE_TUNNEL_SERVICE"):
         if os.environ.get(key):
             values[key] = os.environ[key]
     return values
@@ -82,18 +83,14 @@ def check_setup(hub_dir: Path, env: dict[str, str]) -> list[str]:
     uses_govee = any(d.get("driver") == "govee" for d in config.get("devices", []))
     if uses_govee and not env.get("GOVEE_API_KEY"):
         problems.append("config.json has Govee devices but GOVEE_API_KEY is not set")
-    if tunnel_wanted(hub_dir, env) and len(password) < 16:
+    if tunnel_wanted(env) and len(password) < 16:
         problems.append("the Cloudflare tunnel puts the hub on the internet: use a HUB_PASSWORD of 16+ characters")
     return problems
 
 
-def tunnel_wanted(hub_dir: Path, env: dict[str, str]) -> bool:
-    """The tunnel comes up when cloudflare.json names a real hostname and a token is set."""
-    try:
-        settings = cloudflare.Settings.load(hub_dir / "cloudflare.json")
-    except cloudflare.CloudflareError:
-        return False
-    return settings.configured and bool(env.get("CLOUDFLARE_API_TOKEN"))
+def tunnel_wanted(env: dict[str, str]) -> bool:
+    """The tunnel comes up when CLOUDFLARE_HOSTNAME and CLOUDFLARE_API_TOKEN are both set."""
+    return bool(env.get("CLOUDFLARE_HOSTNAME")) and bool(env.get("CLOUDFLARE_API_TOKEN"))
 
 
 # --- Process helpers ----------------------------------------------------------
@@ -210,12 +207,12 @@ def cmd_up(env: dict[str, str], args) -> None:
     wait_for("matter server", lambda: port_open("127.0.0.1", MATTER_PORT), timeout=90)
     hub = hub_from_env(env)
     wait_for("hub", hub.healthy, timeout=60)
-    if tunnel_wanted(HUB_DIR, env):
+    if tunnel_wanted(env):
         print("cloudflare tunnel...")
         cf = cloudflare.Cloudflare(env["CLOUDFLARE_API_TOKEN"])
-        settings = cloudflare.Settings.load(HUB_DIR / "cloudflare.json")
         account = env.get("CLOUDFLARE_ACCOUNT_ID") or None
         try:
+            settings = cloudflare.Settings.from_env(env)
             cloudflare.deploy(cf, settings, account)
             cloudflare.run(cf, settings, account)
         except cloudflare.CloudflareError as e:

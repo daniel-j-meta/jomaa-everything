@@ -33,7 +33,7 @@ services:
       - ./config.json:/etc/jomaa-home-hub/config.json:ro
 
   cloudflared:
-    # Cloudflare Tunnel: serves the hub at the hostname in cloudflare.json
+    # Cloudflare Tunnel: serves the hub at CLOUDFLARE_HOSTNAME
     # without opening router ports. Started by scripts/cloudflare.py run,
     # which supplies the tunnel token; only the hub is exposed, never the
     # Matter server.
