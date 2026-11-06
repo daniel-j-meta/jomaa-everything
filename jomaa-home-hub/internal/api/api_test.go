@@ -26,7 +26,7 @@ type light struct {
 
 func (l *light) ID() string   { return l.id }
 func (l *light) Name() string { return l.id }
-func (l *light) Apply(ctx context.Context, c device.Command) error {
+func (l *light) Apply(_ context.Context, c device.Command) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.err != nil {
@@ -40,7 +40,7 @@ func (l *light) Apply(ctx context.Context, c device.Command) error {
 	}
 	return nil
 }
-func (l *light) State(ctx context.Context) (device.State, error) {
+func (l *light) State(_ context.Context) (device.State, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.s, l.err
@@ -56,15 +56,15 @@ func (m *fakeMatter) Connected() bool { return m.connected }
 func (m *fakeMatter) Nodes() []matter.NodeSummary {
 	return []matter.NodeSummary{{NodeID: 1, Available: true}}
 }
-func (m *fakeMatter) Commission(ctx context.Context, code string, networkOnly bool) (json.RawMessage, error) {
+func (m *fakeMatter) Commission(_ context.Context, code string, _ bool) (json.RawMessage, error) {
 	m.code = code
 	return json.RawMessage(`{"node_id":5}`), m.err
 }
-func (m *fakeMatter) SetWiFiCredentials(ctx context.Context, ssid, password string) error {
+func (m *fakeMatter) SetWiFiCredentials(_ context.Context, _, _ string) error {
 	return m.err
 }
-func (m *fakeMatter) SetThreadDataset(ctx context.Context, dataset string) error { return m.err }
-func (m *fakeMatter) RemoveNode(ctx context.Context, nodeID uint64) error        { return m.err }
+func (m *fakeMatter) SetThreadDataset(_ context.Context, _ string) error { return m.err }
+func (m *fakeMatter) RemoveNode(_ context.Context, _ uint64) error       { return m.err }
 
 type env struct {
 	srv   *httptest.Server
@@ -93,7 +93,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(t *testing.T, method, path, body, token string) (int, map[string]any) {
 	t.Helper()
-	req, _ := http.NewRequest(method, e.srv.URL+path, strings.NewReader(body))
+	req, _ := http.NewRequestWithContext(context.Background(), method, e.srv.URL+path, strings.NewReader(body))
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -125,18 +125,19 @@ func TestAuth(t *testing.T) {
 
 func TestLoginCookieWorks(t *testing.T) {
 	e := setup(t)
-	res, err := http.Post(e.srv.URL+"/api/login", "application/json", strings.NewReader(`{"password":"hunter2"}`))
+	login, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL+"/api/login", strings.NewReader(`{"password":"hunter2"}`))
+	res, err := http.DefaultClient.Do(login)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	req, _ := http.NewRequest("GET", e.srv.URL+"/api/targets", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, e.srv.URL+"/api/targets", http.NoBody)
 	for _, c := range res.Cookies() {
 		req.AddCookie(c)
 	}
 	got, _ := http.DefaultClient.Do(req)
 	got.Body.Close()
-	if got.StatusCode != 200 {
+	if got.StatusCode != http.StatusOK {
 		t.Fatalf("cookie auth: %d", got.StatusCode)
 	}
 }

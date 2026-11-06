@@ -30,7 +30,7 @@ type bulb struct {
 
 func (b *bulb) ID() string   { return b.id }
 func (b *bulb) Name() string { return b.id }
-func (b *bulb) Apply(ctx context.Context, c device.Command) error {
+func (b *bulb) Apply(_ context.Context, c device.Command) error {
 	if b.onApply != nil {
 		b.onApply()
 	}
@@ -51,7 +51,7 @@ func (b *bulb) Apply(ctx context.Context, c device.Command) error {
 	}
 	return nil
 }
-func (b *bulb) State(ctx context.Context) (device.State, error) {
+func (b *bulb) State(_ context.Context) (device.State, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.state, b.stateErr

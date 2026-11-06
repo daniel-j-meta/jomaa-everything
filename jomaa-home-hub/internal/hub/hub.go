@@ -22,6 +22,7 @@ type Target struct {
 	Features device.Features `json:"features"`
 }
 
+// Hub holds every device and room by id.
 type Hub struct {
 	order   []string
 	devices map[string]device.Device
@@ -29,6 +30,7 @@ type Hub struct {
 	revs    *revisions
 }
 
+// New returns an empty hub.
 func New() *Hub {
 	return &Hub{devices: map[string]device.Device{}, kinds: map[string]string{}, revs: newRevisions()}
 }
@@ -77,11 +79,13 @@ func Build(cfg *config.Config, gc *govee.Client, mc *matter.Client) (*Hub, error
 	return h, nil
 }
 
+// Get looks up a device or room.
 func (h *Hub) Get(id string) (device.Device, bool) {
 	d, ok := h.devices[id]
 	return d, ok
 }
 
+// List returns every device and room in config order.
 func (h *Hub) List() []Target {
 	out := make([]Target, 0, len(h.order))
 	for _, id := range h.order {
@@ -116,6 +120,7 @@ type StateResult struct {
 	Failed  map[string]string       `json:"failed,omitempty"`
 }
 
+// State reads the target and every device under it.
 func (h *Hub) State(ctx context.Context, id string) (StateResult, error) {
 	d, ok := h.devices[id]
 	if !ok {

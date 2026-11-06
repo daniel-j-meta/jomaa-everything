@@ -8,3 +8,4 @@ config.json
 # Matter fabric credentials and pairing state. Never commit.
 data/
 __pycache__/
+bin/

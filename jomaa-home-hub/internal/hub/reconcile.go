@@ -8,6 +8,7 @@ import (
 	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
 )
 
+// ErrNotFound means the id names no device or room.
 var ErrNotFound = errors.New("no device or room with that id")
 
 // Desired is the state a client last asked for. Like device-panel, the client
@@ -20,6 +21,7 @@ type Desired struct {
 	ColorTemperaturePct *int   `json:"colorTemperaturePct"`
 }
 
+// SyncResult reports what a sync pass found and fixed, by device id.
 type SyncResult struct {
 	Synchronized bool                    `json:"synchronized"`
 	Stale        bool                    `json:"stale"`

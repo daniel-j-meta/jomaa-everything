@@ -17,12 +17,18 @@ type Group struct {
 	members  []Device
 }
 
+// NewGroup makes a room from its members.
 func NewGroup(id, name string, members []Device) *Group {
 	return &Group{id: id, name: name, members: members}
 }
 
-func (g *Group) ID() string        { return g.id }
-func (g *Group) Name() string      { return g.name }
+// ID returns the room id.
+func (g *Group) ID() string { return g.id }
+
+// Name returns the room name.
+func (g *Group) Name() string { return g.name }
+
+// Members returns the devices and rooms directly in this room.
 func (g *Group) Members() []Device { return g.members }
 
 // GroupError lists which members failed and why.
@@ -62,6 +68,7 @@ func Failures(id string, err error) map[string]string {
 	return out
 }
 
+// Apply sends cmd to every member at once.
 func (g *Group) Apply(ctx context.Context, cmd Command) error {
 	return g.each(func(d Device) error { return d.Apply(ctx, cmd) })
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 )
 
+// Config is the whole layout file.
 type Config struct {
 	Listen          string   `json:"listen"`
 	MatterServerURL string   `json:"matterServerUrl"`
@@ -39,6 +40,7 @@ type Room struct {
 	Members []string `json:"members"`
 }
 
+// Supported device drivers.
 const (
 	DriverGovee  = "govee"
 	DriverMatter = "matter"
@@ -46,14 +48,16 @@ const (
 
 var validID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// Load reads and validates the layout file.
 func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the operator chooses this path with -config
 	if err != nil {
 		return nil, err
 	}
 	return Parse(raw)
 }
 
+// Parse decodes and validates a layout, filling in defaults.
 func Parse(raw []byte) (*Config, error) {
 	var c Config
 	if err := json.Unmarshal(raw, &c); err != nil {
@@ -68,6 +72,7 @@ func Parse(raw []byte) (*Config, error) {
 	return &c, c.Validate()
 }
 
+// Validate checks ids, driver fields and room references.
 func (c *Config) Validate() error {
 	seen := map[string]bool{}
 	claim := func(id string) error {

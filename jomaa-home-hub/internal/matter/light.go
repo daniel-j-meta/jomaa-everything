@@ -36,6 +36,7 @@ type Light struct {
 	minK, maxK int // fallback when the device doesn't report its range
 }
 
+// LightConfig says which node and endpoint a Light controls.
 type LightConfig struct {
 	ID, Name  string
 	NodeID    uint64
@@ -44,6 +45,8 @@ type LightConfig struct {
 	MaxKelvin int
 }
 
+// NewLight returns a light on the given node, defaulting to endpoint 1 and
+// a 2700-6500K range.
 func NewLight(c *Client, cfg LightConfig) *Light {
 	if cfg.Endpoint == 0 {
 		cfg.Endpoint = 1
@@ -57,7 +60,10 @@ func NewLight(c *Client, cfg LightConfig) *Light {
 	return &Light{client: c, id: cfg.ID, name: cfg.Name, nodeID: cfg.NodeID, endpoint: cfg.Endpoint, minK: cfg.MinKelvin, maxK: cfg.MaxKelvin}
 }
 
-func (l *Light) ID() string   { return l.id }
+// ID returns the hub id of the light.
+func (l *Light) ID() string { return l.id }
+
+// Name returns the display name.
 func (l *Light) Name() string { return l.name }
 
 func (l *Light) path(cluster, attr int) string {
@@ -152,7 +158,8 @@ func (l *Light) Apply(ctx context.Context, cmd device.Command) error {
 	return nil
 }
 
-func (l *Light) State(ctx context.Context) (device.State, error) {
+// State reads the light's state from the attributes the server last reported.
+func (l *Light) State(_ context.Context) (device.State, error) {
 	n, err := l.node()
 	if err != nil {
 		return device.State{}, err

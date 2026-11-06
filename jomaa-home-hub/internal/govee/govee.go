@@ -15,6 +15,7 @@ import (
 	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
 )
 
+// DefaultBaseURL is Govee's public API.
 const DefaultBaseURL = "https://openapi.api.govee.com"
 
 const (
@@ -30,6 +31,7 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+// NewClient returns a client for Govee's cloud API.
 func NewClient(apiKey string) *Client {
 	return &Client{BaseURL: DefaultBaseURL, APIKey: apiKey, HTTP: &http.Client{Timeout: 10 * time.Second}}
 }
@@ -76,7 +78,7 @@ func (c *Client) post(ctx context.Context, path string, p payload) (*response, e
 	if err != nil {
 		return nil, fmt.Errorf("govee %s: %w", path, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("govee %s: HTTP %d: %s", path, res.StatusCode, bytes.TrimSpace(raw))
@@ -109,11 +111,15 @@ type LightConfig struct {
 	MaxKelvin int
 }
 
+// NewLight returns a light that sends its commands through c.
 func NewLight(c *Client, cfg LightConfig) *Light {
 	return &Light{client: c, id: cfg.ID, name: cfg.Name, sku: cfg.SKU, mac: cfg.Device, minK: cfg.MinKelvin, maxK: cfg.MaxKelvin}
 }
 
-func (l *Light) ID() string   { return l.id }
+// ID returns the hub id of the light.
+func (l *Light) ID() string { return l.id }
+
+// Name returns the display name.
 func (l *Light) Name() string { return l.name }
 
 func (l *Light) control(ctx context.Context, typ, instance string, value any) error {
@@ -158,6 +164,7 @@ func (l *Light) Apply(ctx context.Context, cmd device.Command) error {
 	return nil
 }
 
+// State asks Govee for the light's current state.
 func (l *Light) State(ctx context.Context) (device.State, error) {
 	res, err := l.client.post(ctx, "/router/api/v1/device/state", payload{SKU: l.sku, Device: l.mac})
 	if err != nil {

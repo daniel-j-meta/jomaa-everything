@@ -83,8 +83,8 @@ sync can't undo a newer command.
 ## Test
 
 ```bash
-go test -race ./...
-python3 -m unittest discover -s scripts
+python3 scripts/verify.py
 ```
 
-The Python tests build the real hub and drive it against a fake Govee API.
+Runs lint, builds and every test. The Python tests build the real hub and
+drive it against a fake Govee API.

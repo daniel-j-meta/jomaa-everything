@@ -34,6 +34,7 @@ type fakeServer struct {
 }
 
 func newFakeServer(t *testing.T, nodes ...map[string]any) *fakeServer {
+	t.Helper()
 	f := &fakeServer{t: t, nodes: nodes, fail: map[string]bool{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)

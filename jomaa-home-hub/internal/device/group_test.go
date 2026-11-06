@@ -20,14 +20,14 @@ type fake struct {
 
 func (f *fake) ID() string   { return f.id }
 func (f *fake) Name() string { return f.id }
-func (f *fake) Apply(ctx context.Context, c Command) error {
+func (f *fake) Apply(_ context.Context, c Command) error {
 	time.Sleep(f.delay)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, c)
 	return f.err
 }
-func (f *fake) State(ctx context.Context) (State, error) { return f.state, f.err }
+func (f *fake) State(_ context.Context) (State, error) { return f.state, f.err }
 
 func TestGroupSendsToEveryMemberAtOnce(t *testing.T) {
 	a := &fake{id: "a", delay: 100 * time.Millisecond}
@@ -119,7 +119,7 @@ func TestRGBJSON(t *testing.T) {
 }
 
 func TestKelvinRoundTrip(t *testing.T) {
-	for pct := 0; pct <= 100; pct++ {
+	for pct := range 101 {
 		k := KelvinAtPct(2200, 6500, pct)
 		if back := PctFromKelvin(2200, 6500, k); back != pct {
 			t.Fatalf("%d%% -> %dK -> %d%%", pct, k, back)

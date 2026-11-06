@@ -38,6 +38,7 @@ type Matter interface {
 	RemoveNode(ctx context.Context, nodeID uint64) error
 }
 
+// Server serves the hub API.
 type Server struct {
 	hub    *hub.Hub
 	matter Matter
@@ -59,6 +60,7 @@ func sessionToken(password string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// Handler returns the routes, with auth on everything under /api/ except login.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
@@ -99,7 +101,7 @@ func (s *Server) authed(r *http.Request) bool {
 	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
 }
 
-func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "matterConnected": s.matter.Connected()})
 }
 
@@ -114,19 +116,24 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: authCookie, Value: s.token, Path: "/", HttpOnly: true,
+	// Secure only over HTTPS: on the home network the hub is often plain HTTP,
+	// and a Secure cookie would never be sent back.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure depends on the request, see above
+		Name: authCookie, Value: s.token, Path: "/", HttpOnly: true, Secure: r.TLS != nil,
 		SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 60 * 60,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"token": s.token})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: authCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure depends on the request, as in login
+		Name: authCookie, Value: "", Path: "/", HttpOnly: true, Secure: r.TLS != nil,
+		SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (s *Server) listTargets(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listTargets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"targets": s.hub.List()})
 }
 
@@ -184,7 +191,7 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-func (s *Server) matterNodes(w http.ResponseWriter, r *http.Request) {
+func (s *Server) matterNodes(w http.ResponseWriter, _ *http.Request) {
 	if !s.matterReady(w) {
 		return
 	}

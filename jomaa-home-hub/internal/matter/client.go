@@ -21,6 +21,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
+// ErrNotConnected means the hub has no live session with the Matter server.
 var ErrNotConnected = errors.New("not connected to the Matter server")
 
 // Node is one commissioned Matter device. Attributes are keyed by
@@ -73,10 +74,12 @@ type Client struct {
 	nodes    map[uint64]*Node
 }
 
+// NewClient returns a client for the Matter server at url. Call Run to connect.
 func NewClient(url string, log *slog.Logger) *Client {
 	return &Client{url: url, log: log, pending: map[string]chan message{}, nodes: map[uint64]*Node{}}
 }
 
+// Connected reports whether the client is connected and has loaded the nodes.
 func (c *Client) Connected() bool { return c.connected.Load() }
 
 // Run connects and stays connected until ctx is cancelled, backing off between
@@ -104,18 +107,21 @@ func (c *Client) Run(ctx context.Context) {
 
 func (c *Client) session(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	conn, _, err := websocket.Dial(dialCtx, c.url, nil)
+	conn, resp, err := websocket.Dial(dialCtx, c.url, nil)
 	cancel()
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		return err
 	}
 	// Node dumps from start_listening can be large.
 	conn.SetReadLimit(64 << 20)
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// The server greets every connection with its server_info.
 	var info json.RawMessage
-	if err := wsjson.Read(ctx, conn, &info); err != nil {
+	if err = wsjson.Read(ctx, conn, &info); err != nil {
 		return fmt.Errorf("reading server info: %w", err)
 	}
 	c.log.Info("connected to matter server", "url", c.url, "info", string(info))
@@ -130,7 +136,7 @@ func (c *Client) session(ctx context.Context) error {
 	go func() { readErr <- c.readLoop(ctx, conn) }()
 
 	// start_listening returns every node, then streams changes as events.
-	if err := wsjson.Write(ctx, conn, command{MessageID: listenID, Command: "start_listening"}); err != nil {
+	if err = wsjson.Write(ctx, conn, command{MessageID: listenID, Command: "start_listening"}); err != nil {
 		c.disconnect(conn)
 		return err
 	}
@@ -301,6 +307,7 @@ const (
 	attrNodeLabel   = "0/40/5"
 )
 
+// Nodes lists every commissioned node, sorted by id.
 func (c *Client) Nodes() []NodeSummary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -336,16 +343,19 @@ func (c *Client) Commission(ctx context.Context, code string, networkOnly bool) 
 	return c.Call(ctx, "commission_with_code", map[string]any{"code": code, "network_only": networkOnly})
 }
 
+// SetWiFiCredentials sets the Wi-Fi network handed to devices during pairing.
 func (c *Client) SetWiFiCredentials(ctx context.Context, ssid, password string) error {
 	_, err := c.Call(ctx, "set_wifi_credentials", map[string]any{"ssid": ssid, "credentials": password})
 	return err
 }
 
+// SetThreadDataset sets the Thread network handed to devices during pairing.
 func (c *Client) SetThreadDataset(ctx context.Context, dataset string) error {
 	_, err := c.Call(ctx, "set_thread_dataset", map[string]any{"dataset": dataset})
 	return err
 }
 
+// RemoveNode unpairs a node from the hub's Matter fabric.
 func (c *Client) RemoveNode(ctx context.Context, nodeID uint64) error {
 	_, err := c.Call(ctx, "remove_node", map[string]any{"node_id": nodeID})
 	return err

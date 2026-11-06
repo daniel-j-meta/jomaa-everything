@@ -5,6 +5,7 @@ package device
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -67,17 +68,23 @@ func ParseRGB(s string) (RGB, error) {
 	if !hexColor.MatchString(s) {
 		return RGB{}, fmt.Errorf("%w: color must look like #rrggbb", ErrInvalidCommand)
 	}
-	v, _ := strconv.ParseUint(s[1:], 16, 32)
-	return RGB{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v)}, nil
+	b, err := hex.DecodeString(s[1:])
+	if err != nil {
+		return RGB{}, fmt.Errorf("%w: %w", ErrInvalidCommand, err)
+	}
+	return RGB{R: b[0], G: b[1], B: b[2]}, nil
 }
 
 // Int packs the color as 0xRRGGBB, the form Govee expects.
 func (c RGB) Int() int { return int(c.R)<<16 | int(c.G)<<8 | int(c.B) }
 
+// String formats the color as "#rrggbb".
 func (c RGB) String() string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
 
+// MarshalJSON writes the color as "#rrggbb".
 func (c RGB) MarshalJSON() ([]byte, error) { return []byte(strconv.Quote(c.String())), nil }
 
+// UnmarshalJSON reads a "#rrggbb" string.
 func (c *RGB) UnmarshalJSON(b []byte) error {
 	s, err := strconv.Unquote(string(b))
 	if err != nil {
@@ -91,9 +98,11 @@ func (c *RGB) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Bool and Int return pointers, for building commands in code.
+// Bool returns a pointer to v, for building commands in code.
 func Bool(v bool) *bool { return &v }
-func Int(v int) *int    { return &v }
+
+// Int returns a pointer to v, for building commands in code.
+func Int(v int) *int { return &v }
 
 // KelvinAtPct maps 0-100 onto a device's white range (0 = warmest).
 func KelvinAtPct(minK, maxK, pct int) int {
@@ -127,6 +136,7 @@ type Features struct {
 	Color            bool `json:"color"`
 }
 
+// FeatureReporter is implemented by devices that support only some fields.
 type FeatureReporter interface {
 	Features() Features
 }

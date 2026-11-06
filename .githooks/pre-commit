@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks commits that break the hub's format, vet, lint or build.
+# Enabled per clone with: git config core.hooksPath .githooks
+if git diff --cached --name-only | grep -q '^jomaa-home-hub/'; then
+	python3 jomaa-home-hub/scripts/verify.py --fast || {
+		echo "pre-commit: hub checks failed (run jomaa-home-hub/scripts/verify.py)" >&2
+		exit 1
+	}
+fi
