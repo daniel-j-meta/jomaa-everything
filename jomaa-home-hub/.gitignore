@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.dev.vars
+# Matter fabric credentials and commissioning state. Never commit.
+.matter/
+storage/
