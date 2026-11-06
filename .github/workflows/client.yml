@@ -76,8 +76,9 @@ jobs:
           xcodebuild test -project DevicePanel.xcodeproj -scheme DevicePanel \
             -destination "platform=iOS Simulator,id=$id" -resultBundlePath ios-tests.xcresult \
             CODE_SIGNING_ALLOWED=NO
+      # Includes screenshots of each screen the UI tests reach.
       - name: Upload iOS test results
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-test-results
