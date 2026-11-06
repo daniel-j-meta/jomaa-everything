@@ -196,7 +196,9 @@ class DevicePanelViewModel(
     private suspend fun loadState(url: HttpUrl, token: String, target: Target) {
         val response = api.state(url, token, target.id)
         val light = response.state ?: throw DevicePanelException.DevicesFailed(response.failed)
-        val room = RoomState.from(light)
+        // Keep the color or white picked here, which the hub doesn't report.
+        val previous = mutableState.value.room.takeIf { mutableState.value.selected?.id == target.id }
+        val room = RoomState.from(light).copy(color = previous?.color, white = previous?.white ?: false)
         val cached = CachedTarget(target.id, target.name, target.features, light)
         confirmedRoom = room
         stateStore.saveSelectedTarget(cached)
@@ -335,9 +337,10 @@ class DevicePanelViewModel(
                             revision = revision,
                             on = room.on,
                             brightness = room.brightness.takeIf { room.on && features.brightness && it > 0 },
-                            // A color was picked last, so leave white temperature alone.
+                            // Only check white if white was picked here; otherwise
+                            // this would undo a color.
                             colorTemperaturePct = room.colorTemperaturePct.takeIf {
-                                room.on && room.color == null && features.colorTemperature
+                                room.on && room.white && features.colorTemperature
                             },
                         ),
                     )

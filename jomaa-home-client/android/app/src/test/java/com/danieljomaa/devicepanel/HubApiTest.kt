@@ -186,4 +186,15 @@ class HubApiTest {
         assertNull(red.applying(RoomChanges(colorTemperaturePct = 60)).color)
         assertThrows(IllegalArgumentException::class.java) { RoomChanges(brightness = 0) }
     }
+
+    @Test
+    fun whiteIsOnlyKnownOnceItIsPickedHere() {
+        val loaded = RoomState(on = true, brightness = 50, colorTemperaturePct = 30)
+        assertFalse(loaded.white)
+        assertFalse(loaded.applying(RoomChanges(brightness = 10)).white)
+        val white = loaded.applying(RoomChanges(colorTemperaturePct = 60))
+        assertTrue(white.white)
+        assertTrue(white.applying(RoomChanges(on = false)).white)
+        assertFalse(white.applying(RoomChanges(color = ColorPreset.ORANGE)).white)
+    }
 }

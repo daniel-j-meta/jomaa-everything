@@ -59,12 +59,16 @@ enum class ColorPreset(val label: String, val rgb: Int) {
     val hex: String get() = String.format(Locale.US, "#%06x", rgb)
 }
 
-/** What the room should look like right now, as this app last set it. */
+/**
+ * What the room should look like right now, as this app last set it. The hub
+ * doesn't report color, so color and white are only known once picked here.
+ */
 data class RoomState(
     val on: Boolean,
     val brightness: Int,
     val colorTemperaturePct: Int,
     val color: ColorPreset? = null,
+    val white: Boolean = false,
 ) {
     fun applying(changes: RoomChanges): RoomState = copy(
         on = changes.on ?: on,
@@ -74,6 +78,11 @@ data class RoomState(
             changes.color != null -> changes.color
             changes.colorTemperaturePct != null -> null
             else -> color
+        },
+        white = when {
+            changes.colorTemperaturePct != null -> true
+            changes.color != null -> false
+            else -> white
         },
     )
 
