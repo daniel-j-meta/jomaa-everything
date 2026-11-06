@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/device"
 )
 
 // DefaultBaseURL is Govee's public API.

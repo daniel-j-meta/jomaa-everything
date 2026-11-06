@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/api"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/config"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/govee"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/hub"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/matter"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/api"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/config"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/govee"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/hub"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/matter"
 )
 
 func main() {

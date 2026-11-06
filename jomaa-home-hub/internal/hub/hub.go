@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/config"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/govee"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/matter"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/config"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/device"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/govee"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/matter"
 )
 
 // Target is a device or room as the API lists it.

@@ -1,4 +1,4 @@
-module github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/tools
+module github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/tools
 
 go 1.27.3
 

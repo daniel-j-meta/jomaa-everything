@@ -16,7 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/device"
 )
 
 // fakeServer speaks enough of the Matter server's WebSocket API to test

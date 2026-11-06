@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/hub"
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/matter"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/device"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/hub"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/matter"
 )
 
 const (

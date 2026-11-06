@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jomaa-daniel/jomaa-everything/jomaa-home-hub/internal/device"
+	"github.com/daniel-j-meta/jomaa-everything/jomaa-home-hub/internal/device"
 )
 
 // Cluster ids and attribute ids from the Matter spec.

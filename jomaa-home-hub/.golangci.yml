@@ -97,7 +97,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/jomaa-daniel/jomaa-everything
+        - github.com/daniel-j-meta/jomaa-everything
 
 issues:
   max-issues-per-linter: 0
