@@ -1,0 +1,72 @@
+name: client
+
+on:
+  push:
+    paths: ["jomaa-home-client/**", "jomaa-home-hub/**", ".github/workflows/client.yml"]
+  pull_request:
+    paths: ["jomaa-home-client/**", "jomaa-home-hub/**", ".github/workflows/client.yml"]
+
+concurrency:
+  group: client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: jomaa-home-client/android
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests, strict lint and builds
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator app and widget tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          working-directory: jomaa-home-client/android
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: |
+            jomaa-home-client/android/app/build/reports
+            jomaa-home-client/android/app/build/outputs/androidTest-results
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: jomaa-home-hub/go.mod
+      - name: Start the hub with a fake Govee cloud for the UI tests
+        run: |
+          python3 jomaa-home-client/scripts/test_hub.py > test_hub.log 2>&1 &
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8797/healthz && exit 0; sleep 1; done
+          cat test_hub.log; exit 1
+      - name: Unit and UI tests
+        working-directory: jomaa-home-client/ios
+        run: >-
+          xcodebuild test -project DevicePanel.xcodeproj -scheme DevicePanel
+          -destination 'platform=iOS Simulator,name=iPhone 16'
+          CODE_SIGNING_ALLOWED=NO

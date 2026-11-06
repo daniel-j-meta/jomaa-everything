@@ -1,23 +1,31 @@
-# Device Panel for Android
+# Android app
 
-The native Android client targets Android 8 (API 26) and later. It uses Kotlin, Jetpack Compose, coroutines, OkHttp, Android Keystore, and Jetpack Glance.
+Kotlin, Jetpack Compose, OkHttp, Android Keystore and Jetpack Glance. Android 8
+(API 26) and later.
 
-## Included
+Sign in with the hub's address (for example `http://192.168.1.10:8080`) and
+password. Plain http is only allowed for addresses on the home network; use
+https anywhere else. The session token is encrypted with Android Keystore.
 
-- Secure sign-in against the shared `/api/v1` contract.
-- Living Room power, red/orange color, 10/50/75/100 brightness presets, and commit-only color temperature control.
-- Optimistic UI, rollback/retry, cached stale state, lifecycle refresh, and reconciliation.
-- Keystore-encrypted session storage and shared widget state.
-- Small and medium interactive Glance widgets for power and brightness.
-- TalkBack semantics, scalable text, 48 dp targets, status text, and haptic feedback.
+The home-screen widget controls the last room you opened in the app.
 
 ## Build and test
 
-Use JDK 17, Android SDK 35, and Gradle 8.9:
+Needs JDK 17 and the Android SDK.
 
 ```bash
-gradle -p android :app:testDebugUnitTest :app:assembleDebug
-gradle -p android :app:connectedDebugAndroidTest
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+./gradlew :app:connectedDebugAndroidTest      # with an emulator running
 ```
 
-The connected suite runs the real Compose UI, OkHttp client, repository, Keystore storage, and Glance content on an emulator. Its only fake is an in-process loopback HTTP server; the test build rejects non-loopback hosts. `.github/workflows/android.yml` provisions the emulator and runs both app and widget tests.
+Kotlin warnings and lint warnings fail the build. The emulator tests drive the
+real app against an in-process fake hub.
+
+To try the app against the real hub, start `../scripts/test_hub.py` and run:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.danieljomaa.devicepanel.RealHubSmokeTest \
+  -Pandroid.testInstrumentationRunnerArguments.hubUrl=http://10.0.2.2:8797 \
+  -Pandroid.testInstrumentationRunnerArguments.hubPassword=device-panel-test
+```

@@ -32,7 +32,7 @@ import androidx.glance.unit.ColorProvider
 import com.danieljomaa.devicepanel.data.KeystoreSessionStore
 import com.danieljomaa.devicepanel.data.OkHttpDevicePanelApi
 import com.danieljomaa.devicepanel.data.RoomChanges
-import com.danieljomaa.devicepanel.data.RoomState
+import com.danieljomaa.devicepanel.data.CachedTarget
 import com.danieljomaa.devicepanel.data.SharedStateStore
 import com.danieljomaa.devicepanel.domain.IntentCommandService
 import androidx.compose.ui.graphics.Color
@@ -45,18 +45,16 @@ class DevicePanelWidgetReceiver : GlanceAppWidgetReceiver() {
 
 class DevicePanelWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val stateStore = SharedStateStore(context)
-        val room = stateStore.roomState()
-        val session = KeystoreSessionStore(context).load()
-        val authenticated = session != null && !SharedStateStore.sessionExpired(session)
+        val target = SharedStateStore(context).selectedTarget()
+        val authenticated = KeystoreSessionStore(context).load() != null
         provideContent {
-            DevicePanelWidgetContent(room = room, authenticated = authenticated)
+            DevicePanelWidgetContent(target = target, authenticated = authenticated)
         }
     }
 }
 
 @Composable
-fun DevicePanelWidgetContent(room: RoomState?, authenticated: Boolean) {
+fun DevicePanelWidgetContent(target: CachedTarget?, authenticated: Boolean) {
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -73,24 +71,25 @@ fun DevicePanelWidgetContent(room: RoomState?, authenticated: Boolean) {
                 Spacer(GlanceModifier.height(8.dp))
                 Text("Sign in from the app", style = bodyStyle())
             }
-            room == null -> Column(
+            target?.state == null -> Column(
                 modifier = GlanceModifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Living Room", style = headingStyle())
+                Text(target?.name ?: "Home", style = headingStyle())
                 Spacer(GlanceModifier.height(8.dp))
                 Text("Open the app to load state", style = bodyStyle())
             }
-            LocalSize.current.width >= 250.dp -> MediumWidget(room)
-            else -> SmallWidget(room)
+            LocalSize.current.width >= 250.dp && target.features.brightness -> MediumWidget(target)
+            else -> SmallWidget(target)
         }
     }
 }
 
 @Composable
-private fun SmallWidget(room: RoomState) {
+private fun SmallWidget(target: CachedTarget) {
+    val room = target.state ?: return
     Column(modifier = GlanceModifier.fillMaxSize()) {
-        Text("Living Room", style = headingStyle())
+        Text(target.name, style = headingStyle())
         Spacer(GlanceModifier.defaultWeight())
         Text(if (room.on) "On · ${room.brightness}%" else "Off", style = bodyStyle())
         Spacer(GlanceModifier.height(8.dp))
@@ -105,10 +104,11 @@ private fun SmallWidget(room: RoomState) {
 }
 
 @Composable
-private fun MediumWidget(room: RoomState) {
+private fun MediumWidget(target: CachedTarget) {
+    val room = target.state ?: return
     Row(modifier = GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = GlanceModifier.defaultWeight()) {
-            Text("Living Room", style = headingStyle())
+            Text(target.name, style = headingStyle())
             Text(if (room.on) "On" else "Off", style = bodyStyle())
             Spacer(GlanceModifier.height(8.dp))
             Button(

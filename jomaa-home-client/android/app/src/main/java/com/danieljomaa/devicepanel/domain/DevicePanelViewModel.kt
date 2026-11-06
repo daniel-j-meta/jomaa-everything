@@ -3,25 +3,28 @@ package com.danieljomaa.devicepanel.domain
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.danieljomaa.devicepanel.data.CachedTarget
+import com.danieljomaa.devicepanel.data.ColorPreset
+import com.danieljomaa.devicepanel.data.CommandRequest
 import com.danieljomaa.devicepanel.data.DevicePanelApi
 import com.danieljomaa.devicepanel.data.DevicePanelException
-import com.danieljomaa.devicepanel.data.ReconcileRequest
+import com.danieljomaa.devicepanel.data.Features
+import com.danieljomaa.devicepanel.data.MatterNode
+import com.danieljomaa.devicepanel.data.MatterSetupCode
 import com.danieljomaa.devicepanel.data.RoomChanges
-import com.danieljomaa.devicepanel.data.RoomColor
-import com.danieljomaa.devicepanel.data.RoomColorMode
-import com.danieljomaa.devicepanel.data.RoomCommand
 import com.danieljomaa.devicepanel.data.RoomState
 import com.danieljomaa.devicepanel.data.Session
 import com.danieljomaa.devicepanel.data.SessionStore
 import com.danieljomaa.devicepanel.data.SharedStateStore
-import com.danieljomaa.devicepanel.data.SignInRequest
-import com.danieljomaa.devicepanel.data.applying
+import com.danieljomaa.devicepanel.data.SyncRequest
+import com.danieljomaa.devicepanel.data.Target
 import com.danieljomaa.devicepanel.data.validateServerUrl
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,7 +34,7 @@ sealed interface AuthenticationPhase {
     data object Checking : AuthenticationPhase
     data object SigningIn : AuthenticationPhase
     data object SignedOut : AuthenticationPhase
-    data class SignedIn(val serverLabel: String) : AuthenticationPhase
+    data object SignedIn : AuthenticationPhase
 }
 
 enum class ConnectionPhase(val label: String) {
@@ -43,21 +46,33 @@ enum class ConnectionPhase(val label: String) {
     FAILED("Command failed"),
 }
 
+data class MatterUiState(
+    val nodes: List<MatterNode> = emptyList(),
+    val loading: Boolean = false,
+    val pairing: Boolean = false,
+    val pairedNodeId: ULong? = null,
+    val error: String? = null,
+)
+
 data class DevicePanelUiState(
     val authentication: AuthenticationPhase = AuthenticationPhase.Checking,
     val connection: ConnectionPhase = ConnectionPhase.IDLE,
+    val targets: List<Target> = emptyList(),
+    val selected: CachedTarget? = null,
     val room: RoomState? = null,
     val serverUrl: String = "",
     val powerBusy: Boolean = false,
     val error: String? = null,
     val canRetryCommand: Boolean = false,
-)
+    val matter: MatterUiState = MatterUiState(),
+) {
+    val features: Features get() = selected?.features ?: Features()
+}
 
 class DevicePanelViewModel(
     private val api: DevicePanelApi,
     private val sessionStore: SessionStore,
     private val stateStore: SharedStateStore,
-    private val allowInsecureLoopback: Boolean = false,
     private val resetOnStart: Boolean = false,
     private val reconcileDelaysMs: List<Long> = listOf(3_000, 6_000, 10_000, 15_000),
 ) : ViewModel() {
@@ -81,82 +96,80 @@ class DevicePanelViewModel(
             sessionStore.clear()
             stateStore.reset()
         }
-        stateStore.roomState()?.let {
-            confirmedRoom = it
-            mutableState.value = mutableState.value.copy(room = it, connection = ConnectionPhase.STALE)
+        stateStore.selectedTarget()?.let { cached ->
+            val room = cached.state?.let(RoomState::from)
+            confirmedRoom = room
+            mutableState.update { it.copy(selected = cached, room = room, connection = ConnectionPhase.STALE) }
         }
         val savedUrl = stateStore.serverUrl()
-        mutableState.value = mutableState.value.copy(serverUrl = savedUrl.orEmpty())
+        mutableState.update { it.copy(serverUrl = savedUrl.orEmpty()) }
         val storedSession = sessionStore.load()
-        if (savedUrl == null || storedSession == null || SharedStateStore.sessionExpired(storedSession)) {
-            mutableState.value = mutableState.value.copy(authentication = AuthenticationPhase.SignedOut)
+        if (savedUrl == null || storedSession == null) {
+            mutableState.update { it.copy(authentication = AuthenticationPhase.SignedOut) }
             return
         }
         try {
-            baseUrl = validateServerUrl(savedUrl, allowInsecureLoopback)
+            baseUrl = validateServerUrl(savedUrl)
             session = storedSession
-            mutableState.value = mutableState.value.copy(
-                authentication = AuthenticationPhase.SignedIn(storedSession.serverLabel),
-            )
+            mutableState.update { it.copy(authentication = AuthenticationPhase.SignedIn) }
             refresh()
         } catch (error: Exception) {
-            Log.e("DevicePanel", "Sign-in failed", error)
-            mutableState.value = mutableState.value.copy(
-                authentication = AuthenticationPhase.SignedOut,
-                error = error.userMessage(),
-                connection = ConnectionPhase.FAILED,
-            )
+            mutableState.update {
+                it.copy(
+                    authentication = AuthenticationPhase.SignedOut,
+                    error = error.userMessage(),
+                    connection = ConnectionPhase.FAILED,
+                )
+            }
         }
     }
 
-    fun signIn(serverUrl: String, password: String, deviceName: String) = viewModelScope.launch {
+    fun signIn(serverUrl: String, password: String) = viewModelScope.launch {
         if (mutableState.value.authentication == AuthenticationPhase.SigningIn) return@launch
-        mutableState.value = mutableState.value.copy(
-            authentication = AuthenticationPhase.SigningIn,
-            error = null,
-        )
+        mutableState.update { it.copy(authentication = AuthenticationPhase.SigningIn, error = null) }
         try {
-            val validated = validateServerUrl(serverUrl, allowInsecureLoopback)
-            val newSession = api.signIn(
-                validated,
-                SignInRequest(password, stateStore.clientId(), deviceName),
-            )
-            if (SharedStateStore.sessionExpired(newSession)) {
-                throw DevicePanelException.AuthenticationRequired
-            }
+            val validated = validateServerUrl(serverUrl)
+            val newSession = api.signIn(validated, password)
             sessionStore.save(newSession)
-            stateStore.saveServerUrl(validated.toString().removeSuffix("/"))
+            val label = validated.toString().removeSuffix("/")
+            stateStore.saveServerUrl(label)
             baseUrl = validated
             session = newSession
-            mutableState.value = mutableState.value.copy(
-                authentication = AuthenticationPhase.SignedIn(newSession.serverLabel),
-                serverUrl = validated.toString().removeSuffix("/"),
-            )
+            mutableState.update { it.copy(authentication = AuthenticationPhase.SignedIn, serverUrl = label) }
             refresh()
         } catch (error: Exception) {
-            mutableState.value = mutableState.value.copy(
-                authentication = AuthenticationPhase.SignedOut,
-                connection = ConnectionPhase.FAILED,
-                error = error.userMessage(),
-            )
+            mutableState.update {
+                it.copy(
+                    authentication = AuthenticationPhase.SignedOut,
+                    connection = ConnectionPhase.FAILED,
+                    error = error.userMessage(),
+                )
+            }
         }
     }
 
+    /** Reloads the device list and the selected target's state. */
     suspend fun refresh() = commandMutex.withLock {
         val url = baseUrl ?: return@withLock
         val token = session?.token ?: return@withLock
-        mutableState.value = mutableState.value.copy(
-            connection = if (mutableState.value.room == null) ConnectionPhase.LOADING else ConnectionPhase.APPLYING,
-            error = null,
-        )
-        try {
-            val room = api.fetchRoom(url, token)
-            confirmedRoom = room
-            stateStore.saveRoomState(room)
-            mutableState.value = mutableState.value.copy(
-                room = room,
-                connection = ConnectionPhase.CONNECTED,
+        mutableState.update {
+            it.copy(
+                connection = if (it.room == null) ConnectionPhase.LOADING else ConnectionPhase.APPLYING,
+                error = null,
             )
+        }
+        try {
+            val targets = api.targets(url, token)
+            val current = mutableState.value.selected?.id
+            val chosen = targets.firstOrNull { it.id == current }
+                ?: targets.firstOrNull(Target::isRoom)
+                ?: targets.firstOrNull()
+            mutableState.update { it.copy(targets = targets) }
+            if (chosen == null) {
+                mutableState.update { it.copy(selected = null, room = null, connection = ConnectionPhase.CONNECTED) }
+                return@withLock
+            }
+            loadState(url, token, chosen)
         } catch (error: Exception) {
             handle(error)
         }
@@ -164,29 +177,61 @@ class DevicePanelViewModel(
 
     fun refreshFromUi() = viewModelScope.launch { refresh() }
 
+    fun select(targetId: String) = viewModelScope.launch {
+        commandMutex.withLock {
+            val url = baseUrl ?: return@withLock
+            val token = session?.token ?: return@withLock
+            val target = mutableState.value.targets.firstOrNull { it.id == targetId } ?: return@withLock
+            reconcileJob?.cancel()
+            lastFailedChanges = null
+            mutableState.update { it.copy(connection = ConnectionPhase.LOADING, error = null, canRetryCommand = false) }
+            try {
+                loadState(url, token, target)
+            } catch (error: Exception) {
+                handle(error)
+            }
+        }
+    }
+
+    private suspend fun loadState(url: HttpUrl, token: String, target: Target) {
+        val response = api.state(url, token, target.id)
+        val light = response.state ?: throw DevicePanelException.DevicesFailed(response.failed)
+        val room = RoomState.from(light)
+        val cached = CachedTarget(target.id, target.name, target.features, light)
+        confirmedRoom = room
+        stateStore.saveSelectedTarget(cached)
+        mutableState.update {
+            it.copy(
+                selected = cached,
+                room = room,
+                connection = if (response.failed.isEmpty()) ConnectionPhase.CONNECTED else ConnectionPhase.STALE,
+                error = response.failed.takeIf { f -> f.isNotEmpty() }
+                    ?.let { f -> DevicePanelException.DevicesFailed(f).message },
+            )
+        }
+    }
+
     fun setPower(on: Boolean) = viewModelScope.launch {
-        mutableState.value = mutableState.value.copy(powerBusy = true)
+        mutableState.update { it.copy(powerBusy = true) }
         apply(RoomChanges(on = on))
-        mutableState.value = mutableState.value.copy(powerBusy = false)
+        mutableState.update { it.copy(powerBusy = false) }
     }
 
     fun setBrightness(value: Int) = viewModelScope.launch { apply(RoomChanges(brightness = value)) }
 
-    fun setColor(color: RoomColor) = viewModelScope.launch { apply(RoomChanges(color = color)) }
+    fun setColor(color: ColorPreset) = viewModelScope.launch { apply(RoomChanges(color = color)) }
 
-    fun setTemperature(value: Double) = viewModelScope.launch {
-        apply(RoomChanges(colorTemperaturePct = value))
-    }
+    fun setTemperature(value: Int) = viewModelScope.launch { apply(RoomChanges(colorTemperaturePct = value)) }
 
     fun retryLastCommand() = viewModelScope.launch {
-        lastFailedChanges?.let { apply(it) }
+        val changes = lastFailedChanges
+        if (changes != null) apply(changes) else refresh()
     }
 
     fun clearError() {
-        mutableState.value = mutableState.value.copy(
-            error = null,
-            connection = if (mutableState.value.room == null) ConnectionPhase.IDLE else ConnectionPhase.STALE,
-        )
+        mutableState.update {
+            it.copy(error = null, connection = if (it.room == null) ConnectionPhase.IDLE else ConnectionPhase.STALE)
+        }
     }
 
     fun signOut() = viewModelScope.launch {
@@ -205,45 +250,72 @@ class DevicePanelViewModel(
         )
     }
 
+    fun loadMatterNodes() = viewModelScope.launch {
+        val url = baseUrl ?: return@launch
+        val token = session?.token ?: return@launch
+        mutableState.update { it.copy(matter = it.matter.copy(loading = true, error = null)) }
+        try {
+            val nodes = api.matterNodes(url, token)
+            mutableState.update { it.copy(matter = it.matter.copy(nodes = nodes, loading = false)) }
+        } catch (error: Exception) {
+            mutableState.update { it.copy(matter = it.matter.copy(loading = false, error = error.userMessage())) }
+            if (error is DevicePanelException.AuthenticationRequired) handle(error)
+        }
+    }
+
+    /** Pairs a Matter device through the hub, using its QR payload or manual code. */
+    fun pair(code: String, networkOnly: Boolean) = viewModelScope.launch {
+        val url = baseUrl ?: return@launch
+        val token = session?.token ?: return@launch
+        val normalized = MatterSetupCode.normalize(code)
+        if (normalized == null) {
+            mutableState.update {
+                it.copy(matter = it.matter.copy(error = "Enter the 11-digit setup code or the MT: code from the QR label."))
+            }
+            return@launch
+        }
+        mutableState.update { it.copy(matter = it.matter.copy(pairing = true, pairedNodeId = null, error = null)) }
+        try {
+            val nodeId = api.commission(url, token, normalized, networkOnly)
+            mutableState.update { it.copy(matter = it.matter.copy(pairing = false, pairedNodeId = nodeId)) }
+            loadMatterNodes()
+        } catch (error: Exception) {
+            mutableState.update { it.copy(matter = it.matter.copy(pairing = false, error = error.userMessage())) }
+            if (error is DevicePanelException.AuthenticationRequired) handle(error)
+        }
+    }
+
+    fun clearPairingResult() {
+        mutableState.update { it.copy(matter = it.matter.copy(pairedNodeId = null, error = null)) }
+    }
+
     private suspend fun apply(changes: RoomChanges) = commandMutex.withLock {
         val url = baseUrl ?: return@withLock handle(DevicePanelException.AuthenticationRequired)
         val token = session?.token ?: return@withLock handle(DevicePanelException.AuthenticationRequired)
+        val target = mutableState.value.selected ?: return@withLock
         val before = mutableState.value.room ?: return@withLock
         val optimistic = before.applying(changes)
         val revision = stateStore.nextRevision()
         latestRevision = revision
-        mutableState.value = mutableState.value.copy(
-            room = optimistic,
-            connection = ConnectionPhase.APPLYING,
-            error = null,
-            canRetryCommand = false,
-        )
+        mutableState.update {
+            it.copy(room = optimistic, connection = ConnectionPhase.APPLYING, error = null, canRetryCommand = false)
+        }
         lastFailedChanges = null
 
         try {
-            val response = api.sendCommand(
-                url,
-                token,
-                RoomCommand(clientId = stateStore.clientId(), revision = revision, changes = changes),
-            )
-            if (!response.accepted) throw DevicePanelException.InvalidResponse
-            val confirmed = response.state ?: optimistic
-            confirmedRoom = confirmed
-            stateStore.saveRoomState(confirmed)
-            mutableState.value = mutableState.value.copy(
-                room = optimistic,
-                connection = ConnectionPhase.CONNECTED,
-            )
-            startReconciliation(revision)
+            api.command(url, token, target.id, CommandRequest.from(changes, stateStore.clientId(), revision))
+            confirmedRoom = optimistic
+            stateStore.saveSelectedTarget(target.copy(state = optimistic.toLightState()))
+            mutableState.update { it.copy(connection = ConnectionPhase.CONNECTED) }
+            startReconciliation(target.id, target.features, revision)
         } catch (error: Exception) {
-            mutableState.value = mutableState.value.copy(room = confirmedRoom ?: before)
             lastFailedChanges = changes
-            mutableState.value = mutableState.value.copy(canRetryCommand = true)
+            mutableState.update { it.copy(room = confirmedRoom ?: before, canRetryCommand = true) }
             handle(error)
         }
     }
 
-    private fun startReconciliation(revision: Long) {
+    private fun startReconciliation(targetId: String, features: Features, revision: Long) {
         reconcileJob?.cancel()
         if (reconcileDelaysMs.isEmpty()) return
         reconcileJob = viewModelScope.launch {
@@ -254,22 +326,24 @@ class DevicePanelViewModel(
                 val url = baseUrl ?: return@launch
                 val token = session?.token ?: return@launch
                 try {
-                    val response = api.reconcile(
+                    val response = api.sync(
                         url,
                         token,
-                        ReconcileRequest(
+                        targetId,
+                        SyncRequest(
                             clientId = stateStore.clientId(),
                             revision = revision,
                             on = room.on,
-                            brightness = room.brightness.takeIf { room.on },
+                            brightness = room.brightness.takeIf { room.on && features.brightness && it > 0 },
+                            // A color was picked last, so leave white temperature alone.
                             colorTemperaturePct = room.colorTemperaturePct.takeIf {
-                                room.on && room.colorMode == RoomColorMode.TEMPERATURE
+                                room.on && room.color == null && features.colorTemperature
                             },
                         ),
                     )
                     if (response.stale || revision != latestRevision) return@launch
                     if (response.synchronized) {
-                        mutableState.value = mutableState.value.copy(connection = ConnectionPhase.CONNECTED)
+                        mutableState.update { it.copy(connection = ConnectionPhase.CONNECTED) }
                         return@launch
                     }
                 } catch (error: Exception) {
@@ -277,31 +351,33 @@ class DevicePanelViewModel(
                         handle(error)
                         return@launch
                     }
-                    mutableState.value = mutableState.value.copy(
-                        connection = ConnectionPhase.STALE,
-                        error = error.userMessage(),
-                    )
+                    mutableState.update { it.copy(connection = ConnectionPhase.STALE, error = error.userMessage()) }
                 }
             }
             if (revision == latestRevision) {
-                mutableState.value = mutableState.value.copy(connection = ConnectionPhase.STALE)
+                mutableState.update { it.copy(connection = ConnectionPhase.STALE) }
             }
         }
     }
 
     private suspend fun handle(error: Exception) {
-        Log.e("DevicePanel", "Device Panel operation failed", error)
+        Log.e("DevicePanel", "Hub request failed", error)
         if (error is DevicePanelException.AuthenticationRequired) {
             sessionStore.clear()
             session = null
-            mutableState.value = mutableState.value.copy(authentication = AuthenticationPhase.SignedOut)
+            mutableState.update { it.copy(authentication = AuthenticationPhase.SignedOut) }
         }
-        mutableState.value = mutableState.value.copy(
-            connection = if (error is DevicePanelException.Offline) ConnectionPhase.STALE else ConnectionPhase.FAILED,
-            error = error.userMessage(),
-        )
+        mutableState.update {
+            it.copy(
+                connection = if (error is DevicePanelException.Offline) ConnectionPhase.STALE else ConnectionPhase.FAILED,
+                error = error.userMessage(),
+            )
+        }
     }
 }
 
-private fun Exception.userMessage(): String =
-    (this as? DevicePanelException)?.message ?: "Device Panel could not complete the request."
+internal fun RoomState.toLightState() =
+    com.danieljomaa.devicepanel.data.LightState(on, brightness, colorTemperaturePct)
+
+internal fun Exception.userMessage(): String =
+    (this as? DevicePanelException)?.message ?: "The hub couldn't complete the request."

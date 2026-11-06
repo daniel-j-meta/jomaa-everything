@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- targetCell* size the widget on Android 12+; older versions use minWidth/minHeight. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
     android:description="@string/widget_description"
     android:initialLayout="@android:layout/simple_list_item_1"
     android:minWidth="110dp"

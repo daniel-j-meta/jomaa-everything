@@ -1,6 +1,5 @@
 package com.danieljomaa.devicepanel
 
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,14 +26,13 @@ class MainActivity : ComponentActivity() {
                 ),
                 sessionStore = KeystoreSessionStore(applicationContext),
                 stateStore = SharedStateStore(applicationContext),
-                allowInsecureLoopback = BuildConfig.DEBUG,
                 resetOnStart = reset,
                 reconcileDelaysMs = if (loopbackOnly) listOf(50, 100) else listOf(3_000, 6_000, 10_000, 15_000),
             ) as T
         })[DevicePanelViewModel::class.java]
 
         setContent {
-            DevicePanelApp(viewModel = viewModel, deviceName = "${Build.MANUFACTURER} ${Build.MODEL}")
+            DevicePanelApp(viewModel = viewModel)
         }
     }
 

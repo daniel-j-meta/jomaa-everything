@@ -29,7 +29,7 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
             127.0.0.1:
               NSExceptionAllowsInsecureHTTPLoads: true
-        NSLocalNetworkUsageDescription: Connect to your Device Panel server to control lights.
+        NSLocalNetworkUsageDescription: Connect to your home hub to control lights and pair Matter devices.
   DevicePanelTests:
     type: bundle.unit-test
     platform: iOS

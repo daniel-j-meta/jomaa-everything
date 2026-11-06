@@ -18,13 +18,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // The hub usually runs on the home network over plain HTTP. The app only
+        // allows http for local addresses (see validateServerUrl).
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
     }
 
     buildTypes {
-        debug {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
-        }
         release {
             isMinifyEnabled = true
             proguardFiles(
@@ -40,6 +39,14 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        allWarningsAsErrors = true
+    }
+    lint {
+        warningsAsErrors = true
+        abortOnError = true
+        checkDependencies = true
+        // Dependency versions are bumped deliberately, not on every lint run.
+        disable += "GradleDependency"
     }
     buildFeatures {
         compose = true
@@ -83,6 +90,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")

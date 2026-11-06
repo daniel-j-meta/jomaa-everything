@@ -1,18 +1,23 @@
 package com.danieljomaa.devicepanel.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.security.KeyStore
-import java.time.Instant
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+
+/** The hub's session token. It stays valid until the hub password changes. */
+@Serializable
+data class Session(val token: String)
 
 interface SessionStore {
     suspend fun load(): Session?
@@ -20,6 +25,8 @@ interface SessionStore {
     suspend fun clear()
 }
 
+// commit() on purpose: the widget and app read these right after writing.
+@SuppressLint("ApplySharedPref")
 class KeystoreSessionStore(context: Context) : SessionStore {
     private val preferences = context.getSharedPreferences("device_panel_secure", Context.MODE_PRIVATE)
     private val json = Json
@@ -80,9 +87,21 @@ class KeystoreSessionStore(context: Context) : SessionStore {
     }
 }
 
+/** The last room the app showed, cached for the widget and for offline starts. */
+@Serializable
+data class CachedTarget(
+    val id: String,
+    val name: String,
+    val features: Features,
+    val state: LightState? = null,
+)
+
+// commit() on purpose: the revision counter must be on disk before a command
+// goes out, and the widget reads the cached room right after the app writes it.
+@SuppressLint("ApplySharedPref")
 class SharedStateStore(context: Context) {
     private val preferences = context.getSharedPreferences("device_panel_shared", Context.MODE_PRIVATE)
-    private val json = Json { encodeDefaults = false; explicitNulls = false }
+    private val json = Json { encodeDefaults = false; explicitNulls = false; ignoreUnknownKeys = true }
     private val lock = Any()
 
     fun serverUrl(): String? = preferences.getString(KEY_SERVER_URL, null)
@@ -98,6 +117,7 @@ class SharedStateStore(context: Context) {
         }
     }
 
+    /** One rising counter for every command this install sends, as the hub expects. */
     fun nextRevision(): Long = synchronized(lock) {
         val current = preferences.getLong(KEY_REVISION, 0)
         val timestamp = System.currentTimeMillis() * 1_000
@@ -106,26 +126,22 @@ class SharedStateStore(context: Context) {
         }
     }
 
-    fun roomState(): RoomState? = preferences.getString(KEY_ROOM, null)?.let {
-        runCatching { json.decodeFromString<RoomState>(it) }.getOrNull()
+    fun selectedTarget(): CachedTarget? = preferences.getString(KEY_TARGET, null)?.let {
+        runCatching { json.decodeFromString<CachedTarget>(it) }.getOrNull()
     }
 
-    fun saveRoomState(state: RoomState) {
-        preferences.edit().putString(KEY_ROOM, json.encodeToString(state)).commit()
+    fun saveSelectedTarget(target: CachedTarget) {
+        preferences.edit().putString(KEY_TARGET, json.encodeToString(target)).commit()
     }
 
     fun reset() {
         preferences.edit().clear().commit()
     }
 
-    companion object {
-        private const val KEY_SERVER_URL = "server_url"
-        private const val KEY_CLIENT_ID = "client_id"
-        private const val KEY_REVISION = "revision"
-        private const val KEY_ROOM = "room_state"
-
-        fun sessionExpired(session: Session): Boolean = runCatching {
-            Instant.parse(session.expiresAt).isBefore(Instant.now())
-        }.getOrDefault(true)
+    private companion object {
+        const val KEY_SERVER_URL = "server_url"
+        const val KEY_CLIENT_ID = "client_id"
+        const val KEY_REVISION = "revision"
+        const val KEY_TARGET = "selected_target"
     }
 }

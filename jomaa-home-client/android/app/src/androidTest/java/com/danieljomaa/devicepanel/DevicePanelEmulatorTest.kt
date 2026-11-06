@@ -5,6 +5,10 @@ import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -71,13 +75,13 @@ class DevicePanelEmulatorTest {
         assertState("brightness75", "Selected")
 
         compose.onNodeWithTag("colorRed").performClick()
-        waitForServer { it.colorMode == "red" }
+        waitForServer { it.color == "#ff0000" }
         assertState("colorRed", "Selected")
 
         compose.onNodeWithTag("temperatureSlider").performTouchInput {
             click(percentOffset(0.25f, 0.5f))
         }
-        waitForServer { kotlin.math.abs(it.colorTemperaturePct - 25) <= 3 && it.colorMode == "temperature" }
+        waitForServer { kotlin.math.abs(it.colorTemperaturePct - 25) <= 3 && it.color == null }
 
         dispatcher.failNextCommand()
         compose.onNodeWithTag("powerControl").performClick()
@@ -93,13 +97,53 @@ class DevicePanelEmulatorTest {
         waitForServer { !it.on }
         assertState("powerControl", "Off")
 
-        dispatcher.updateRoom { it.copy(on = true, brightness = 10, colorTemperaturePct = 80.0) }
+        dispatcher.updateRoom { it.copy(on = true, brightness = 10, colorTemperaturePct = 80) }
         compose.onNodeWithTag("refreshButton").performClick()
         assertState("powerControl", "On")
         assertState("brightness10", "Selected")
 
         check(dispatcher.paths().isNotEmpty())
-        check(dispatcher.paths().all { it.startsWith("/api/v1/") })
+        check(dispatcher.paths().all { it.startsWith("/api/") })
+    }
+
+    @Test
+    fun switchingToAPlugHidesControlsItCantUse() {
+        signIn()
+        compose.onNodeWithTag("targetTitle").assertTextEquals("Living Room")
+        compose.onNodeWithTag("brightness75").assertExists()
+
+        compose.onNodeWithTag("target-desk-plug").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasTestTag("targetTitle") and hasText("Desk Plug")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("brightness75").assertDoesNotExist()
+        compose.onNodeWithTag("temperatureSlider").assertDoesNotExist()
+        compose.onNodeWithTag("colorRed").assertDoesNotExist()
+
+        compose.onNodeWithTag("powerControl").performClick()
+        waitForServer { it.plugOn }
+        assertState("powerControl", "On")
+    }
+
+    @Test
+    fun pairsAMatterDeviceThroughTheHub() {
+        signIn()
+        compose.onNodeWithTag("matterButton").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasText("Acme Plug", substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("pairingCode").performTextInput("1234")
+        compose.onNodeWithTag("pairButton").performClick()
+        compose.onNodeWithTag("pairingError").assertExists()
+
+        compose.onNodeWithTag("pairingCode").performTextClearance()
+        compose.onNodeWithTag("pairingCode").performTextInput("3497-011-2332")
+        compose.onNodeWithTag("pairButton").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasTestTag("pairingResult")).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Paired as node 7", substring = true).assertExists()
+        check(dispatcher.snapshot().pairedCodes == listOf("34970112332"))
     }
 
     @Test
@@ -113,7 +157,7 @@ class DevicePanelEmulatorTest {
             compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.TestTag, "serverUrlField"))
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Your session has expired. Sign in again.").assertExists()
+        compose.onNodeWithText("Your session has ended. Sign in again.").assertExists()
     }
 
     @Test
@@ -129,7 +173,7 @@ class DevicePanelEmulatorTest {
             ).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Incorrect password.").assertExists()
-        check(dispatcher.paths() == listOf("/api/v1/sessions"))
+        check(dispatcher.paths() == listOf("/api/login"))
     }
 
     private fun signIn() {

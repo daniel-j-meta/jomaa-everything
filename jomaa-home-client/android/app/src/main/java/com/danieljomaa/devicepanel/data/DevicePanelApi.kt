@@ -1,7 +1,7 @@
 package com.danieljomaa.devicepanel.data
 
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,18 +20,25 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/**
+ * The hub's HTTP API. Every device looks the same here, whatever brand it is:
+ * the hub speaks Matter (and anything else) on the app's behalf.
+ */
 interface DevicePanelApi {
-    suspend fun signIn(baseUrl: HttpUrl, request: SignInRequest): Session
+    suspend fun signIn(baseUrl: HttpUrl, password: String): Session
     suspend fun signOut(baseUrl: HttpUrl, token: String)
-    suspend fun fetchRoom(baseUrl: HttpUrl, token: String): RoomState
-    suspend fun sendCommand(baseUrl: HttpUrl, token: String, command: RoomCommand): CommandResponse
-    suspend fun reconcile(baseUrl: HttpUrl, token: String, request: ReconcileRequest): ReconcileResponse
+    suspend fun targets(baseUrl: HttpUrl, token: String): List<Target>
+    suspend fun state(baseUrl: HttpUrl, token: String, targetId: String): StateResponse
+    suspend fun command(baseUrl: HttpUrl, token: String, targetId: String, request: CommandRequest)
+    suspend fun sync(baseUrl: HttpUrl, token: String, targetId: String, request: SyncRequest): SyncResponse
+    suspend fun matterNodes(baseUrl: HttpUrl, token: String): List<MatterNode>
+    suspend fun commission(baseUrl: HttpUrl, token: String, code: String, networkOnly: Boolean): ULong?
 }
 
 class OkHttpDevicePanelApi(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
         .build(),
@@ -39,63 +46,76 @@ class OkHttpDevicePanelApi(
 ) : DevicePanelApi {
     private val allowedHosts = allowedHosts?.map(String::lowercase)?.toSet()
     private val json = Json {
-        ignoreUnknownKeys = false
+        ignoreUnknownKeys = true
         encodeDefaults = false
         explicitNulls = false
     }
     private val mediaType = "application/json; charset=utf-8".toMediaType()
 
-    override suspend fun signIn(baseUrl: HttpUrl, request: SignInRequest): Session =
-        execute(
-            baseUrl,
-            "api/v1/sessions",
-            "POST",
-            body = json.encodeToString(request),
-            unauthorizedError = DevicePanelException.InvalidCredentials,
-        )
-
-    override suspend fun signOut(baseUrl: HttpUrl, token: String) {
-        executeEmpty(baseUrl, "api/v1/session", "DELETE", token)
+    // Pairing a Matter device can take a few minutes; the hub allows five.
+    private val pairingClient by lazy {
+        client.newBuilder().readTimeout(6, TimeUnit.MINUTES).callTimeout(6, TimeUnit.MINUTES).build()
     }
 
-    override suspend fun fetchRoom(baseUrl: HttpUrl, token: String): RoomState =
-        execute(baseUrl, "api/v1/rooms/living-room", "GET", token)
+    override suspend fun signIn(baseUrl: HttpUrl, password: String): Session {
+        val response: LoginResponse = execute(
+            baseUrl,
+            listOf("api", "login"),
+            "POST",
+            body = json.encodeToString(LoginRequest(password)),
+            unauthorizedError = DevicePanelException.InvalidCredentials,
+        )
+        return Session(response.token)
+    }
 
-    override suspend fun sendCommand(
-        baseUrl: HttpUrl,
-        token: String,
-        command: RoomCommand,
-    ): CommandResponse = execute(
-        baseUrl,
-        "api/v1/rooms/living-room/commands",
-        "POST",
-        token,
-        json.encodeToString(command),
-        mapOf("Idempotency-Key" to command.commandId),
-    )
+    override suspend fun signOut(baseUrl: HttpUrl, token: String) {
+        execute<Map<String, Boolean>>(baseUrl, listOf("api", "logout"), "POST", token)
+    }
 
-    override suspend fun reconcile(
-        baseUrl: HttpUrl,
-        token: String,
-        request: ReconcileRequest,
-    ): ReconcileResponse = execute(
-        baseUrl,
-        "api/v1/rooms/living-room/reconcile",
-        "POST",
-        token,
-        json.encodeToString(request),
-    )
+    override suspend fun targets(baseUrl: HttpUrl, token: String): List<Target> =
+        execute<TargetList>(baseUrl, listOf("api", "targets"), "GET", token).targets
+
+    override suspend fun state(baseUrl: HttpUrl, token: String, targetId: String): StateResponse =
+        execute(baseUrl, listOf("api", "targets", targetId, "state"), "GET", token)
+
+    override suspend fun command(baseUrl: HttpUrl, token: String, targetId: String, request: CommandRequest) {
+        execute<Map<String, Boolean>>(
+            baseUrl,
+            listOf("api", "targets", targetId, "command"),
+            "POST",
+            token,
+            json.encodeToString(request),
+        )
+    }
+
+    override suspend fun sync(baseUrl: HttpUrl, token: String, targetId: String, request: SyncRequest): SyncResponse =
+        execute(baseUrl, listOf("api", "targets", targetId, "sync"), "POST", token, json.encodeToString(request))
+
+    override suspend fun matterNodes(baseUrl: HttpUrl, token: String): List<MatterNode> =
+        execute<MatterNodeList>(baseUrl, listOf("api", "matter", "nodes"), "GET", token).nodes
+
+    override suspend fun commission(baseUrl: HttpUrl, token: String, code: String, networkOnly: Boolean): ULong? {
+        val response: CommissionResponse = execute(
+            baseUrl,
+            listOf("api", "matter", "commission"),
+            "POST",
+            token,
+            json.encodeToString(CommissionRequest(code, networkOnly)),
+            httpClient = pairingClient,
+        )
+        return response.node?.nodeId
+    }
 
     private suspend inline fun <reified T> execute(
         baseUrl: HttpUrl,
-        path: String,
+        path: List<String>,
         method: String,
         token: String? = null,
         body: String? = null,
-        headers: Map<String, String> = emptyMap(),
         unauthorizedError: DevicePanelException = DevicePanelException.AuthenticationRequired,
+        httpClient: OkHttpClient = client,
     ): T = withContext(Dispatchers.IO) {
-        perform(baseUrl, path, method, token, body, headers).use {
+        perform(httpClient, baseUrl, path, method, token, body).use {
             validate(it, unauthorizedError)
             val value = it.body?.string() ?: throw DevicePanelException.InvalidResponse
             try {
@@ -106,43 +126,27 @@ class OkHttpDevicePanelApi(
         }
     }
 
-    private suspend fun executeEmpty(
-        baseUrl: HttpUrl,
-        path: String,
-        method: String,
-        token: String,
-    ) {
-        withContext(Dispatchers.IO) {
-            perform(baseUrl, path, method, token, null, emptyMap()).use {
-                validate(it, DevicePanelException.AuthenticationRequired)
-            }
-        }
-    }
-
     private suspend fun perform(
+        httpClient: OkHttpClient,
         baseUrl: HttpUrl,
-        path: String,
+        path: List<String>,
         method: String,
         token: String?,
         body: String?,
-        headers: Map<String, String>,
     ): Response {
         if (allowedHosts != null && baseUrl.host.lowercase() !in allowedHosts) {
             throw DevicePanelException.InvalidServerUrl
         }
-        val url = baseUrl.newBuilder().addPathSegments(path).build()
-        val requestBody = body?.toRequestBody(mediaType)
+        val url = baseUrl.newBuilder().apply { path.forEach(::addPathSegment) }.build()
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         token?.let { builder.header("Authorization", "Bearer $it") }
-        headers.forEach(builder::header)
         when (method) {
             "GET" -> builder.get()
-            "POST" -> builder.post(requestBody ?: ByteArray(0).toRequestBody(mediaType))
-            "DELETE" -> builder.delete()
+            "POST" -> builder.post((body ?: "{}").toRequestBody(mediaType))
             else -> error("Unsupported HTTP method")
         }
         return try {
-            client.newCall(builder.build()).await()
+            httpClient.newCall(builder.build()).await()
         } catch (error: SocketTimeoutException) {
             throw DevicePanelException.TimedOut
         } catch (error: IOException) {
@@ -151,29 +155,46 @@ class OkHttpDevicePanelApi(
     }
 
     private fun validate(response: Response, unauthorizedError: DevicePanelException) {
-        if (response.isSuccessful) return
+        if (response.isSuccessful) {
+            val type = response.header("Content-Type").orEmpty().lowercase()
+            if (!type.contains("application/json")) throw DevicePanelException.InvalidResponse
+            return
+        }
         val payload = response.body?.string()?.let {
             runCatching { json.decodeFromString<ApiErrorPayload>(it) }.getOrNull()
         }
-        throw when (response.code) {
-            401 -> unauthorizedError
-            403 -> DevicePanelException.PermissionDenied
-            429 -> DevicePanelException.RateLimited(response.header("Retry-After")?.toLongOrNull())
-            else -> DevicePanelException.Server(response.code, payload?.code, payload?.message)
+        throw when {
+            response.code == 401 -> unauthorizedError
+            response.code == 502 && !payload?.failed.isNullOrEmpty() -> DevicePanelException.DevicesFailed(payload!!.failed!!)
+            response.code == 503 -> DevicePanelException.MatterUnavailable
+            else -> DevicePanelException.Server(response.code, payload?.error)
         }
     }
 }
 
-fun validateServerUrl(value: String, allowInsecureLoopback: Boolean): HttpUrl {
+/**
+ * Accepts https anywhere, and plain http only for addresses on the home
+ * network: loopback, private IPv4 ranges, link-local, ".local" names and
+ * single-label host names. The hub normally runs on the LAN without TLS.
+ */
+fun validateServerUrl(value: String): HttpUrl {
     val url = value.trim().toHttpUrlOrNull() ?: throw DevicePanelException.InvalidServerUrl
-    val loopback = url.host in setOf("localhost", "127.0.0.1", "::1")
-    if (!url.isHttps && !(allowInsecureLoopback && loopback)) {
-        throw DevicePanelException.InvalidServerUrl
-    }
+    if (!url.isHttps && !isLocalHost(url.host)) throw DevicePanelException.InvalidServerUrl
     if (url.username.isNotEmpty() || url.password.isNotEmpty() || url.query != null || url.fragment != null) {
         throw DevicePanelException.InvalidServerUrl
     }
+    if (url.pathSegments.any { it.isNotEmpty() }) throw DevicePanelException.InvalidServerUrl
     return url
+}
+
+internal fun isLocalHost(host: String): Boolean {
+    val h = host.lowercase().removePrefix("[").removeSuffix("]")
+    if (h == "localhost" || h.endsWith(".local")) return true
+    if (h.contains(':')) return h == "::1" || h.startsWith("fe80:") || h.startsWith("fd") || h.startsWith("fc")
+    val octets = h.split(".").map { it.toIntOrNull() ?: return !h.contains('.') && !h.contains(':') }
+    if (octets.size != 4 || octets.any { it !in 0..255 }) return false
+    val (a, b) = octets
+    return a == 10 || a == 127 || (a == 172 && b in 16..31) || (a == 192 && b == 168) || (a == 169 && b == 254)
 }
 
 private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->

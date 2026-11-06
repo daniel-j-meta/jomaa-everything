@@ -4,6 +4,7 @@ private let panelAccent = Color(red: 1, green: 0.71, blue: 0.30)
 
 struct ContentView: View {
     @ObservedObject var panel: PanelModel
+    @State private var showMatter = false
 
     var body: some View {
         ZStack {
@@ -28,18 +29,18 @@ struct ContentView: View {
                     .font(.system(size: 42)).foregroundStyle(panelAccent)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Device Panel").font(.largeTitle.bold())
-                    Text("Your living room, one touch away.").foregroundStyle(.secondary)
+                    Text("Your home hub, one touch away.").foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Server URL").font(.subheadline.weight(.medium))
-                        TextField("http://127.0.0.1:8787", text: $panel.server)
+                        Text("Hub address").font(.subheadline.weight(.medium))
+                        TextField("http://192.168.1.10:8080", text: $panel.server)
                             .keyboardType(.URL).textInputAutocapitalization(.never)
                             .autocorrectionDisabled().accessibilityIdentifier("serverURL")
                             .fieldStyle()
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Password").font(.subheadline.weight(.medium))
+                        Text("Hub password").font(.subheadline.weight(.medium))
                         SecureField("Password", text: $panel.password)
                             .textContentType(.password).submitLabel(.go)
                             .accessibilityIdentifier("password").fieldStyle()
@@ -73,7 +74,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Living Room").font(.largeTitle.bold())
+                            Text(panel.selected?.name ?? "Home").font(.largeTitle.bold())
+                                .accessibilityIdentifier("targetTitle")
                             Text("Make yourself at home.").foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -85,11 +87,17 @@ struct ContentView: View {
                             .accessibilityIdentifier("connectionStatus")
                         if panel.busy { ProgressView().scaleEffect(0.7) }
                     }
+                    if panel.targets.count > 1 { TargetPicker(panel: panel) }
                     if let error = panel.errorMessage { ErrorBanner(message: error) }
-                    PowerCard(panel: panel)
-                    BrightnessCard(panel: panel)
-                    ColorCard(panel: panel)
-                    TemperatureCard(panel: panel)
+                    if panel.selected != nil {
+                        PowerCard(panel: panel)
+                        if panel.features.brightness { BrightnessCard(panel: panel) }
+                        if panel.features.color { ColorCard(panel: panel) }
+                        if panel.features.colorTemperature { TemperatureCard(panel: panel) }
+                    } else if !panel.busy {
+                        Text("The hub has no devices yet. Add them to its config.json.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(24).frame(maxWidth: 620)
                 .frame(maxWidth: .infinity)
@@ -97,6 +105,10 @@ struct ContentView: View {
             .background(Color.clear)
             .scrollContentBackground(.hidden)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showMatter = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add Matter device").accessibilityIdentifier("matterButton")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await panel.refresh() }
@@ -109,6 +121,9 @@ struct ContentView: View {
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showMatter, onDismiss: panel.clearPairingResult) {
+                MatterPairingView(panel: panel)
+            }
         }
         .background(Color.clear)
     }
@@ -136,7 +151,7 @@ private struct PowerCard: View {
                 }
             }
         }
-        .accessibilityLabel("Living room power").accessibilityIdentifier("powerToggle")
+        .accessibilityLabel("\(panel.selected?.name ?? "Room") power").accessibilityIdentifier("powerToggle")
         .disabled(panel.busy).padding(20).cardStyle()
     }
 }
@@ -176,28 +191,29 @@ private struct ColorCard: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Color", systemImage: "paintpalette").font(.headline)
             HStack(spacing: 12) {
-                colorButton("red", title: "Red", color: .red)
-                colorButton("orange", title: "Orange", color: .orange)
+                ForEach(ColorPreset.allCases) { preset in
+                    colorButton(preset, color: preset == .red ? .red : .orange)
+                }
             }
             .disabled(panel.busy)
         }
         .padding(20).cardStyle()
     }
 
-    private func colorButton(_ value: String, title: String, color: Color) -> some View {
+    private func colorButton(_ value: ColorPreset, color: Color) -> some View {
         Button {
             Task { await panel.setColor(value) }
         } label: {
             HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 14, height: 14)
-                Text(title).fontWeight(.medium)
+                Text(value.title).fontWeight(.medium)
                 if panel.selectedColor == value { Image(systemName: "checkmark") }
             }
             .frame(maxWidth: .infinity).padding(.vertical, 12)
             .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(panel.selectedColor == value ? color : .clear, lineWidth: 2))
         }
-        .foregroundStyle(.white).accessibilityIdentifier("color\(title)")
+        .foregroundStyle(.white).accessibilityIdentifier("color\(value.title)")
         .accessibilityAddTraits(panel.selectedColor == value ? .isSelected : [])
     }
 }
@@ -225,6 +241,97 @@ private struct TemperatureCard: View {
             .font(.subheadline)
         }
         .padding(20).cardStyle()
+    }
+}
+
+private struct TargetPicker: View {
+    @ObservedObject var panel: PanelModel
+
+    var body: some View {
+        // Rooms first, then single devices.
+        let ordered = panel.targets.filter(\.isRoom) + panel.targets.filter { !$0.isRoom }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ordered) { target in
+                    let selected = target.id == panel.selected?.id
+                    Button {
+                        Task { await panel.select(target) }
+                    } label: {
+                        Label(target.name, systemImage: target.isRoom ? "square.split.2x2" : "lightbulb")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .foregroundStyle(selected ? Color.black : Color.white)
+                            .background(selected ? panelAccent : Color.white.opacity(0.08), in: Capsule())
+                    }
+                    .accessibilityIdentifier("target-\(target.id)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .disabled(panel.busy)
+    }
+}
+
+struct MatterPairingView: View {
+    @ObservedObject var panel: PanelModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var networkOnly = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Paired devices") {
+                    if panel.matterNodes.isEmpty {
+                        Text("No Matter devices paired yet.").foregroundStyle(.secondary)
+                    }
+                    ForEach(panel.matterNodes) { node in
+                        HStack {
+                            Text(node.displayName)
+                            Spacer()
+                            Text("node \(node.nodeId)").foregroundStyle(.secondary).monospacedDigit()
+                            Circle().fill(node.available ? .green : .red).frame(width: 8, height: 8)
+                        }
+                    }
+                }
+                Section {
+                    TextField("MT:… or 1234-567-8901", text: $code)
+                        .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        .accessibilityIdentifier("pairingCode")
+                    Toggle("Already on my network", isOn: $networkOnly)
+                    Button {
+                        Task { await panel.pair(code: code, networkOnly: networkOnly) }
+                    } label: {
+                        HStack {
+                            if panel.pairing { ProgressView() }
+                            Text(panel.pairing ? "Pairing…" : "Pair")
+                        }
+                    }
+                    .disabled(code.isEmpty || panel.pairing)
+                    .accessibilityIdentifier("pairButton")
+                } header: {
+                    Text("Add a device")
+                } footer: {
+                    Text("Use the setup code on the device or its box. The hub does the pairing, so keep the device near it.")
+                }
+                if let node = panel.pairedNodeId {
+                    Text("Paired as node \(node). Add it to a room in the hub's config.json.")
+                        .foregroundStyle(.green).accessibilityIdentifier("pairingResult")
+                }
+                if let error = panel.matterError {
+                    Text(error).foregroundStyle(.red).accessibilityIdentifier("pairingError")
+                }
+            }
+            .navigationTitle("Matter devices")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.disabled(panel.pairing)
+                }
+            }
+            .task { await panel.loadMatterNodes() }
+            .onChange(of: panel.pairedNodeId) { _, node in if node != nil { code = "" } }
+        }
+        .interactiveDismissDisabled(panel.pairing)
     }
 }
 

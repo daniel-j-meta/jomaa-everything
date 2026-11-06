@@ -37,6 +37,6 @@
 		</dict>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to your Device Panel server to control lights.</string>
+	<string>Connect to your home hub to control lights and pair Matter devices.</string>
 </dict>
 </plist>

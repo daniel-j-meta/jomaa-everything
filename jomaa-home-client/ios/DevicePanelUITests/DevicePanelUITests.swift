@@ -1,12 +1,14 @@
 import XCTest
 
+/// Runs against the real hub and a fake Govee cloud. Start them first with:
+///     python3 jomaa-home-client/scripts/test_hub.py
 @MainActor
 final class DevicePanelUITests: XCTestCase {
     private let server = "http://127.0.0.1:8797"
     private let mock = "http://127.0.0.1:8798"
 
-    func testNativeControlsReachEveryMockDevice() async throws {
-        _ = try await mockRequest("/__mock/reset", body: [:])
+    func testNativeControlsReachEveryDevice() async throws {
+        _ = try await mockRequest("/__fake/reset", body: [:])
         let app = signIn()
         let power = app.switches["powerToggle"]
         XCTAssertEqual(power.value as? String, "1")
@@ -21,36 +23,32 @@ final class DevicePanelUITests: XCTestCase {
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         slider.adjust(toNormalizedSliderPosition: 0.75)
         try await Task.sleep(for: .seconds(1))
-        let state = try await mockRequest("/__mock/state")
+        let state = try await mockRequest("/__fake/state")
         let devices = state["devices"] as! [String: [String: Any]]
-        XCTAssertEqual(devices.count, 10)
+        XCTAssertEqual(devices.count, 2)
         for device in devices.values {
             XCTAssertEqual(device["powerSwitch"] as? Int, 0)
             XCTAssertEqual(device["brightness"] as? Int, 75)
-            XCTAssertEqual(device["colorRgb"] as? Int, 16744192)
+            XCTAssertEqual(device["colorRgb"] as? Int, 0xFF8000)
         }
-        let requests = try await mockRequestArray("/__mock/requests")
-        XCTAssertEqual(requests.filter { (($0["body"] as? [String: Any])?["payload"] as? [String: Any])?["capability"] as? [String: Any] != nil }.count, 40)
-        let temperatureRequests = requests.filter {
-            let payload = ($0["body"] as? [String: Any])?["payload"] as? [String: Any]
-            return (payload?["capability"] as? [String: Any])?["instance"] as? String == "colorTemperatureK"
-        }
-        XCTAssertEqual(temperatureRequests.count, 10, "Slider must send one fleet command when editing ends")
+        let requests = try await mockRequestArray("/__fake/requests")
+        let temperatureRequests = requests.filter { $0["instance"] as? String == "colorTemperatureK" }
+        XCTAssertEqual(temperatureRequests.count, 2, "Slider must send one room command when editing ends")
         attach(app, name: "Native living room controls")
     }
 
     func testFailedPowerCommandRollsBackAndRecovers() async throws {
-        _ = try await mockRequest("/__mock/reset", body: [:])
+        _ = try await mockRequest("/__fake/reset", body: [:])
         let app = signIn()
-        _ = try await mockRequest("/__mock/fail", body: ["enabled": true])
+        _ = try await mockRequest("/__fake/fail", body: ["enabled": true])
         let power = app.switches["powerToggle"]
         power.tap()
         let error = app.staticTexts["errorMessage"]
         XCTAssertTrue(error.waitForExistence(timeout: 10))
         XCTAssertEqual(power.value as? String, "1")
-        XCTAssertTrue(error.label.contains("HTTP 500"))
+        XCTAssertTrue(error.label.contains("didn't respond"))
         attach(app, name: "Failed command restored power state")
-        _ = try await mockRequest("/__mock/fail", body: ["enabled": false])
+        _ = try await mockRequest("/__fake/fail", body: ["enabled": false])
         power.tap()
         XCTAssertTrue(app.staticTexts["Lights are off"].waitForExistence(timeout: 10))
     }
@@ -58,6 +56,7 @@ final class DevicePanelUITests: XCTestCase {
     private func signIn() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["DEVICE_PANEL_BASE_URL"] = server
+        app.launchEnvironment["DEVICE_PANEL_RESET"] = "1"
         app.launch()
         let password = app.secureTextFields["password"]
         XCTAssertTrue(password.waitForExistence(timeout: 10))

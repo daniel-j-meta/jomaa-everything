@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">Device Panel</string>
-    <string name="widget_description">Control Living Room power and brightness</string>
+    <string name="widget_description">Control your last-used room</string>
 </resources>

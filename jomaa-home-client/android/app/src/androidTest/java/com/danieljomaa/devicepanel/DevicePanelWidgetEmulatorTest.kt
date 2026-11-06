@@ -6,8 +6,9 @@ import androidx.glance.appwidget.testing.unit.runGlanceAppWidgetUnitTest
 import androidx.glance.testing.unit.hasClickAction
 import androidx.glance.testing.unit.hasText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.danieljomaa.devicepanel.data.RoomColorMode
-import com.danieljomaa.devicepanel.data.RoomState
+import com.danieljomaa.devicepanel.data.CachedTarget
+import com.danieljomaa.devicepanel.data.Features
+import com.danieljomaa.devicepanel.data.LightState
 import com.danieljomaa.devicepanel.widget.DevicePanelWidgetContent
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,7 +19,7 @@ class DevicePanelWidgetEmulatorTest {
     fun smallWidgetRendersStateAndInteractivePower() = runGlanceAppWidgetUnitTest {
         setAppWidgetSize(DpSize(170.dp, 170.dp))
         provideComposable {
-            DevicePanelWidgetContent(room = roomState(), authenticated = true)
+            DevicePanelWidgetContent(target = target(), authenticated = true)
         }
 
         onNode(hasText("Living Room")).assertExists()
@@ -30,7 +31,7 @@ class DevicePanelWidgetEmulatorTest {
     fun mediumWidgetRendersAllBrightnessActions() = runGlanceAppWidgetUnitTest {
         setAppWidgetSize(DpSize(364.dp, 170.dp))
         provideComposable {
-            DevicePanelWidgetContent(room = roomState(), authenticated = true)
+            DevicePanelWidgetContent(target = target(), authenticated = true)
         }
 
         listOf("10%", "50%", "75%", "100%").forEach { label ->
@@ -41,18 +42,16 @@ class DevicePanelWidgetEmulatorTest {
     @Test
     fun signedOutWidgetDoesNotExposeControls() = runGlanceAppWidgetUnitTest {
         provideComposable {
-            DevicePanelWidgetContent(room = null, authenticated = false)
+            DevicePanelWidgetContent(target = null, authenticated = false)
         }
 
         onNode(hasText("Sign in from the app")).assertExists()
     }
 
-    private fun roomState() = RoomState(
-        on = true,
-        brightness = 75,
-        colorTemperaturePct = 50.0,
-        colorMode = RoomColorMode.TEMPERATURE,
-        observedAt = "2026-10-08T12:00:00.123Z",
-        stateSource = "representative",
+    private fun target() = CachedTarget(
+        id = "living-room",
+        name = "Living Room",
+        features = Features(brightness = true, colorTemperature = true, color = true),
+        state = LightState(on = true, brightness = 75, colorTemperaturePct = 50),
     )
 }
