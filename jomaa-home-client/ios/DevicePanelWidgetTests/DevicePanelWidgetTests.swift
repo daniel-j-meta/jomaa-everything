@@ -14,7 +14,8 @@ final class DevicePanelWidgetTests: XCTestCase {
             brightness: 75,
             colorTemperaturePct: 50,
             colorMode: .temperature,
-            observedAt: Date()
+            // Whole seconds: the cache stores dates without fractions.
+            observedAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
         await preferences.saveSelectedTarget(
             CachedTarget(id: "lamp-a", name: "Lamp A", features: Features(brightness: true), state: state)

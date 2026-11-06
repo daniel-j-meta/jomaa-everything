@@ -9,10 +9,12 @@ enum AppEnvironment {
         ) as? String
 
         // UI tests run against a hub on this machine; see DevicePanelUITests.
+        // Their builds are unsigned, so they have no Keychain group to share
+        // with the widget; each test signs in afresh anyway.
         if ProcessInfo.processInfo.arguments.contains("-ui-testing-reset") {
             return RoomController(
                 api: HTTPDevicePanelAPI(allowedHosts: ["127.0.0.1", "localhost", "::1"]),
-                sessionStore: KeychainSessionStore(accessGroup: accessGroup),
+                sessionStore: InMemorySessionStore(),
                 preferences: SharedPreferences(),
                 reconcileDelays: [.milliseconds(50), .milliseconds(100)],
                 resetPersistentStateOnStart: true

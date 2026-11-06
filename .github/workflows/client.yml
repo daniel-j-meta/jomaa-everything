@@ -74,4 +74,13 @@ jobs:
           id=$(xcrun simctl list devices available iPhone -j \
             | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds))')
           xcodebuild test -project DevicePanel.xcodeproj -scheme DevicePanel \
-            -destination "platform=iOS Simulator,id=$id" CODE_SIGNING_ALLOWED=NO
+            -destination "platform=iOS Simulator,id=$id" -resultBundlePath ios-tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Upload iOS test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: |
+            jomaa-home-client/ios/ios-tests.xcresult
+            test_hub.log

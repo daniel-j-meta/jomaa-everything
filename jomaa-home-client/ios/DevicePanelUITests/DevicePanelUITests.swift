@@ -117,7 +117,10 @@ final class DevicePanelUITests: XCTestCase {
         let app = makeApp()
         app.launch()
         signIn(app, password: "device-panel-test")
-        XCTAssertTrue(app.navigationBars["Living Room"].waitForExistence(timeout: 15))
+        XCTAssertTrue(
+            app.navigationBars["Living Room"].waitForExistence(timeout: 15),
+            "Sign-in didn't reach the Living Room. Screen:\n\(app.debugDescription)"
+        )
         XCTAssertTrue(app.descendants(matching: .any)["connectionStatus"].waitForExistence(timeout: 5))
         return app
     }
