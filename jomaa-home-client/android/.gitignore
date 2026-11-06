@@ -3,7 +3,6 @@ build/
 local.properties
 *.iml
 captures/
-.externalNativeBuild/
-.cxx/
+.kotlin/
 *.keystore
 *.jks

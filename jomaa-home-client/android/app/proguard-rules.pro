@@ -1,0 +1,3 @@
+-keepattributes *Annotation*
+-keepclassmembers class **$$serializer { *; }
+-keep,includedescriptorclasses class com.danieljomaa.devicepanel.data.**$$serializer { *; }

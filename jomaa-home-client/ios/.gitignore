@@ -2,6 +2,6 @@ build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+*.xcresult
 .swiftpm/
 .build/
-Pods/
