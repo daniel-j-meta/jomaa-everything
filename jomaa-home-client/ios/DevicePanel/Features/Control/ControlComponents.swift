@@ -101,10 +101,15 @@ struct TargetPicker: View {
     let selectedID: String?
     let select: (String) -> Void
 
+    /// Rooms first, as on Android.
+    private var ordered: [Target] {
+        targets.filter(\.isRoom) + targets.filter { !$0.isRoom }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                ForEach(targets) { target in
+                ForEach(ordered) { target in
                     let selected = target.id == selectedID
                     Button {
                         select(target.id)
