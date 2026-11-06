@@ -2,6 +2,9 @@ node_modules/
 dist/
 coverage/
 .dev.vars
-# Matter fabric credentials and commissioning state. Never commit.
-.matter/
-storage/
+# Your layout and secrets. config.example.json and .env.example are the templates.
+config.json
+.env
+# Matter fabric credentials and pairing state. Never commit.
+data/
+__pycache__/
