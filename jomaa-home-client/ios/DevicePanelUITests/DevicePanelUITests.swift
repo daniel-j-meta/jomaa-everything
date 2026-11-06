@@ -79,9 +79,10 @@ final class DevicePanelUITests: XCTestCase {
 
         app.buttons["addMatterDeviceButton"].tap()
         XCTAssertTrue(app.navigationBars["Matter Devices"].waitForExistence(timeout: 5))
-        let error = app.descendants(matching: .any)["matterError"]
-        XCTAssertTrue(error.waitForExistence(timeout: 10))
-        XCTAssertTrue(error.label.contains("isn't connected to its Matter server"))
+        XCTAssertTrue(
+            app.staticTexts["The hub isn't connected to its Matter server."].waitForExistence(timeout: 10),
+            "Expected the missing Matter server message. Screen:\n\(app.debugDescription)"
+        )
         attach(app, name: "Matter pairing")
     }
 
@@ -93,9 +94,11 @@ final class DevicePanelUITests: XCTestCase {
 
         signIn(app, password: "wrong-password")
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["Sign-in error: Incorrect password."].waitForExistence(timeout: 10)
-        )
+        let error = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Sign-in error:"))
+            .firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 20), "No sign-in error shown. Screen:\n\(app.debugDescription)")
+        XCTAssertEqual(error.label, "Sign-in error: Incorrect password.")
         XCTAssertFalse(app.navigationBars["Living Room"].exists)
     }
 
